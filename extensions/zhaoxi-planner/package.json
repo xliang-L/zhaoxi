@@ -1,0 +1,16 @@
+{
+  "name": "@openclaw/zhaoxi-planner",
+  "version": "2026.10.7",
+  "private": true,
+  "description": "Opt-in campus, exam and fitness execution for 朝夕",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "runtimeExtensions": [
+      "./build/index.js"
+    ]
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,13 @@
+services:
+  zhaoxi:
+    build: .
+    init: true
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      ZHAOXI_ALLOWED_HOSTS: ${ZHAOXI_ALLOWED_HOSTS:-localhost,127.0.0.1}
+    volumes:
+      - zhaoxi-data:/var/lib/zhaoxi
+    restart: unless-stopped
+volumes:
+  zhaoxi-data:

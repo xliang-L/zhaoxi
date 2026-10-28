@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/openclaw/openclaw.git",
+  "ref": "d754f7c3ae79e50de4471c60cfb115665bd9db45",
+  "version": "2026.10.7",
+  "patches": [
+    "memory.patch",
+    "persona.patch"
+  ]
+}

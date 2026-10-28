@@ -1,0 +1,23 @@
+{
+  "id": "dafeiyu-domain",
+  "name": "大肥鱼个人计划与偏好",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "shadowOnly": {
+        "type": "boolean",
+        "default": true
+      }
+    }
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "dafeiyu_plan",
+      "dafeiyu_matter"
+    ]
+  }
+}

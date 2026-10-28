@@ -1,0 +1,28 @@
+{
+  "id": "zhaoxi-planner",
+  "name": "朝夕",
+  "version": "2026.10.7",
+  "description": "Campus, exam and fitness plans offered only when the user asks for them.",
+  "categories": [
+    "productivity"
+  ],
+  "enabledByDefault": false,
+  "activation": {
+    "onStartup": false
+  },
+  "skills": [
+    "./skills/zhaoxi-campus",
+    "./skills/zhaoxi-exam",
+    "./skills/zhaoxi-fitness"
+  ],
+  "contracts": {
+    "tools": [
+      "zhaoxi_plan"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  }
+}

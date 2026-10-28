@@ -1,0 +1,8 @@
+{
+  "id": "dafeiyu-companion",
+  "name": "大肥鱼闲聊素材",
+  "activation": {"onStartup": true},
+  "skills": ["./skills/dafeiyu-companion"],
+  "contracts": {"tools": ["dafeiyu_story"]},
+  "configSchema": {"type":"object","additionalProperties":false,"properties":{"packDirectory":{"type":"string"}}}
+}

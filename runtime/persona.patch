@@ -1,0 +1,26 @@
+diff --git a/src/agents/system-prompt-runtime.ts b/src/agents/system-prompt-runtime.ts
+index a6d97ebe1..043333304 100644
+--- a/src/agents/system-prompt-runtime.ts
++++ b/src/agents/system-prompt-runtime.ts
+@@ -27,8 +27,6 @@ export function buildRuntimeLine(
+     node: runtimeInfo?.node,
+     active_node: runtimeInfo?.activeNode && sanitizeForPromptLiteral(runtimeInfo.activeNode),
+     active_node_identity: runtimeInfo?.activeNodeIdentity,
+-    model: runtimeInfo?.model,
+-    default_model: runtimeInfo?.defaultModel,
+     shell: runtimeInfo?.shell,
+     channel: runtimeChannel,
+     // Named for the channel so models never read it as this session's tool capabilities.
+diff --git a/src/agents/system-prompt.ts b/src/agents/system-prompt.ts
+index c59cafc19..34b81d336 100644
+--- a/src/agents/system-prompt.ts
++++ b/src/agents/system-prompt.ts
+@@ -246,7 +246,7 @@ export function buildModelIdentityPromptLine(model?: string): string | undefined
+   if (!trimmed) {
+     return undefined;
+   }
+-  return `${MODEL_IDENTITY_PREFIX} ${trimmed}. If asked what model you are, answer with this value for the current run.`;
++  return `${MODEL_IDENTITY_PREFIX} unknown. Your underlying provider, model name, and version are not exposed as your conversational identity. If asked, answer "不知道". Do not inspect tools or use operational routing identifiers to infer your identity.`;
+ }
+ 
+ export function appendModelIdentitySystemPrompt(params: {

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f4f0e8"><title>计划与记忆 · 朝夕</title>
+<link rel="icon" href="/static/mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/domain.css">
+</head>
+<body class="mode-portal domain-page">
+<header class="member-header"><div class="member-header-inner domain-header-inner"><a class="brand" href="/#home" aria-label="朝夕首页"><span class="brand-fish"><svg class="fish-art " viewBox="0 0 140 120" fill="none" aria-hidden="true"><path d="m106 54 25-17-4 28 5 20-27-13" fill="#78939E"/><path d="M58 23c-8-9-21-10-28-7l5 22" fill="#66828E"/><ellipse cx="64" cy="65" rx="49" ry="39" fill="#8CA6B1"/><path d="M19 73c4 21 22 33 46 33 23 0 40-12 46-31-14 14-26 20-47 18-19-2-31-9-45-20Z" fill="#C4D3D5"/><path d="m62 77 18-11-4 22" fill="#6E8D9B"/><path d="m28 58 7-3m12 0 7 3" stroke="#344C57" stroke-width="3.5" stroke-linecap="round"/><circle cx="35" cy="64" r="2.5" fill="#293F49"/><circle cx="49" cy="64" r="2.5" fill="#293F49"/><path d="m37 77 10-1" stroke="#344C57" stroke-width="2.6" stroke-linecap="round"/><ellipse cx="24" cy="73" rx="7" ry="3.6" fill="#DDB6AA"/><path d="m89 28 8-9m-2 21 10-2" stroke="#C4D1D3" stroke-width="3" stroke-linecap="round"/></svg></span><strong>朝夕</strong></a><a class="domain-return" href="/#persona">返回人设设置 <span aria-hidden="true">↗</span></a></div></header>
+<div class="domain-shell">
+<nav class="domain-main-nav" aria-label="主要导航"><a href="/#persona">人设设置</a><a href="/#wechat">微信绑定</a><a href="/#settings">模型与额度</a><a href="/my-plans" aria-current="page">计划与记忆</a></nav>
+<main>
+<div class="domain-hero"><div><p class="domain-eyebrow">YOUR EVERYDAY</p><h1>计划与记忆</h1><p class="domain-intro">安排接下来要做的事，整理想让搭子记住的信息。</p><p id="current-agent-scope" class="domain-footnote">正在确认当前智能体…</p></div><button class="primary domain-add-plan" type="button" data-open-plan><span aria-hidden="true">＋</span> 新增计划</button></div>
+<div class="domain-status"><span aria-hidden="true"></span><p id="status" role="status" aria-live="polite">正在读取…</p></div>
+<div class="domain-tabs" role="tablist" aria-label="计划与记忆分区"><button type="button" id="tab-matters" role="tab" aria-selected="false" aria-controls="panel-matters" tabindex="-1" data-tab="matters">事项与资料</button><button type="button" id="tab-plans" role="tab" aria-selected="true" aria-controls="panel-plans" data-tab="plans">我的计划</button><button type="button" id="tab-memory" role="tab" aria-selected="false" aria-controls="panel-memory" tabindex="-1" data-tab="memory">记忆与偏好</button><button type="button" id="tab-preferences" role="tab" aria-selected="false" aria-controls="panel-preferences" tabindex="-1" data-tab="preferences">提醒设置</button></div>
+<section id="panel-matters" class="domain-panel" role="tabpanel" aria-labelledby="tab-matters" hidden>
+<div class="domain-plan-layout"><div class="domain-plan-main">
+<section class="domain-card"><div class="domain-card-heading"><div><h2>通知与事项</h2><p>把通知、截图或文件转给小鲸鱼，确认后一起盯住准备和截止。</p></div></div><div id="matter-pending" class="domain-confirm"></div><div id="matters"></div></section>
+<section class="domain-card"><div class="domain-card-heading"><div><h2>我的资料</h2><p>保存原件和收到时间。需要时在微信问她，也可以在这里找回。</p></div></div><label>查找资料 <input id="document-filter" type="search" placeholder="比如：志愿证明、实验报告" maxlength="100"></label><div id="documents"></div><div id="document-confirm" class="domain-confirm" aria-live="polite"></div></section>
+</div><aside class="domain-plan-side"><section class="domain-card domain-note"><h2>顺手发给她就好</h2><p>“帮我看看这份通知，需要准备什么。”</p><p>“这是更正通知，更新刚才那件事。”</p><p>“把上次的志愿证明找给我。”</p><p>“实验报告交了。”</p><p class="domain-footnote">确认前不会创建提醒。原通知没写清的日期会先问你；转发时间会保留，原群和原作者无法自动核实。</p></section><div id="matter-feedback" class="domain-card" role="status" aria-live="polite" hidden></div></aside></div>
+</section>
+<section id="panel-plans" class="domain-panel" role="tabpanel" aria-labelledby="tab-plans">
+<div class="domain-plan-layout"><div class="domain-plan-main">
+<section class="domain-card"><div class="domain-card-heading"><div><h2>课表与计划</h2><p>从一件小事开始，按自己的节奏来。</p></div></div><div id="plans"></div><div id="plan-confirm" class="domain-confirm" aria-live="polite"></div></section>
+<details id="plan-editor" class="domain-card domain-editor"><summary>新增或修改计划草稿 <span aria-hidden="true">＋</span></summary><div class="domain-editor-body"><form id="plan-form" class="domain-form">
+<label>事项 <input name="title" maxlength="160" required></label>
+<div class="row"><label>类型 <select name="kind"><option value="plan">计划</option><option value="course">课程</option><option value="reminder">提醒</option></select></label><label>时区 <input name="timezone" required placeholder="Asia/Shanghai"></label></div>
+<div class="row"><label>到期或开始时间 <input name="due" type="datetime-local" required></label><label>结束时间（可选）<input name="end" type="datetime-local"></label></div>
+<label>地点（可选）<input name="location" maxlength="200"></label>
+<div class="row"><label>重复 <select name="frequency"><option value="">不重复</option><option value="daily">每天</option><option value="weekly">每周同一天</option></select></label><label>周次 <select name="weekParity"><option value="all">每周</option><option value="odd">单周</option><option value="even">双周</option></select></label><label>学期第一周周一（单双周使用）<input name="termStart" type="date"></label></div>
+<label>备注（可选）<textarea name="notes" maxlength="2000"></textarea></label>
+<div class="domain-form-actions"><button class="primary">保存为待确认草稿</button><button type="button" id="new-plan">清空并新建</button></div><p class="muted">保存草稿后需要再确认。修改已确认的计划会暂停原提醒，重新确认后生效。</p></form></div></details>
+</div><aside class="domain-plan-side">
+<section class="domain-card domain-note"><span class="domain-note-icon" aria-hidden="true">✧</span><h2>想到什么，先说给它听</h2><p>也可以在微信里描述计划。大肥鱼会请你确认，确认后再生效。</p><a href="/#wechat">查看微信连接 <span aria-hidden="true">→</span></a></section>
+<section class="domain-card domain-reminders"><h2 id="reminder-heading">提醒执行记录</h2><div id="dispatches"></div><details class="domain-help"><summary>查看发送记录</summary><div id="reminders"></div><p>“已提交发送”不代表手机已收到或你已阅读。结果不明时不会自动重发，请在微信核对后再选择是否继续后续提醒。</p></details></section>
+</aside></div>
+</section>
+<section id="panel-memory" class="domain-panel" role="tabpanel" aria-labelledby="tab-memory" hidden>
+<!-- automatic-memory-consent:start -->
+<div id="automatic-memory-consent-slot">
+<section class="domain-card memory-access-card" aria-labelledby="memory-access-heading">
+<div class="domain-card-heading"><div><h2 id="memory-access-heading">自动记住一些偏好</h2><p>是否允许读取对话、是否自动记忆，分别由你决定。</p></div><span id="memory-access-badge" class="memory-access-badge">正在核对</span></div>
+<p class="memory-account-scope">这项选择只对当前选中的智能体生效，其他智能体需要单独授权。</p>
+<div class="memory-access-states"><div><span>读取对话</span><strong id="memory-reading-state">未确认</strong></div><div><span>自动保存与取用</span><strong id="memory-recording-state">未确认</strong></div></div>
+<p id="memory-access-status" role="status" aria-live="polite">正在读取设置…</p>
+<div id="memory-access-notice" class="memory-access-notice"><h3>开启前，请先了解</h3><p id="memory-notice-text">正在读取说明…</p><p class="memory-coverage">目前只整理支持的城市、15 类兴趣和少量回复偏好。不确定的信息需要你确认；不会自动开启定位、提醒或主动发消息。</p></div>
+<div id="memory-enable-group"><label class="memory-acknowledgement"><input id="memory-notice-ack" type="checkbox" disabled><span>我已阅读以上说明，同意读取对话并开启自动记忆。</span></label><button id="memory-enable" class="primary" type="button" disabled>同意并开启</button></div>
+<div id="memory-stop-group" hidden><p>停止后，不再自动保存或取用这些记录；读取对话的授权仍然保留。</p><button id="memory-auto-stop" type="button" disabled>停止自动记忆</button></div>
+<div class="memory-revoke-row" id="memory-revoke-group" hidden><p>如需停止后续读取对话，请单独撤销读取授权。</p><button id="memory-revoke-open" type="button" disabled>撤销对话读取授权…</button></div>
+<div id="memory-revoke-confirmation" class="domain-confirm" role="group" aria-labelledby="memory-revoke-heading" hidden><h3 id="memory-revoke-heading">确认撤销对话读取授权？</h3><p>这会停止今后的对话读取和自动保存、取用，已有记录仍保留。已经读取或交给聊天 AI 的内容无法收回；正在处理的一次任务仍可能完成。此操作不会删除微信聊天记录或其他记忆。</p><button id="memory-revoke-confirm" type="button">确认撤销授权</button><button id="memory-revoke-cancel" type="button">暂不撤销</button></div>
+<div class="memory-feedback-row"><p id="memory-access-feedback" role="status" aria-live="polite"></p><button id="memory-access-refresh" type="button">刷新状态</button><a id="memory-connect-link" href="/#wechat" hidden>去连接微信 →</a></div>
+</section>
+</div>
+<!-- automatic-memory-consent:end -->
+<section class="domain-card"><div class="domain-card-heading"><div><h2>我保存的事实与偏好</h2><p>整理已保存的信息，按你的需要修改。</p></div></div>
+<details class="domain-help domain-memory-scope"><summary>这些记录会影响什么？</summary><p>这里管理你手动保存或按授权从对话整理的事实和偏好。修改、删除从下一轮生效，正在生成的一轮可能仍使用已经读取的信息。不会删除微信聊天历史或其他记忆。</p></details>
+<div class="domain-subsection"><div class="domain-subheading"><h3>待确认的信息</h3><span>确认后才会保存</span></div><div id="fact-drafts"></div><div id="auto-fact-suggestions" class="memory-suggestions" aria-live="polite"></div><p class="domain-footnote">你提交的偏好草稿 15 分钟后失效；对话建议请查看各条的有效时间。</p></div>
+<div class="domain-subsection"><div class="domain-subheading"><h3>已保存记录</h3></div><div id="facts"></div></div>
+<form id="fact-add" class="domain-form domain-fact-add"><label>新增事实或偏好 <input name="text" maxlength="2000" required placeholder="例如：我喜欢简洁一点的提醒"></label><button class="primary">保存这条记录</button></form>
+<div class="domain-memory-actions"><div><p id="fact-state"></p><small>暂停后，已有记录仍会保留。</small></div><button id="fact-pause">暂停这份记录的新写入</button></div><div id="fact-confirm" class="domain-confirm" aria-live="polite"></div></section>
+</section>
+<section id="panel-preferences" class="domain-panel" role="tabpanel" aria-labelledby="tab-preferences" hidden>
+<div class="domain-settings-layout"><div class="proactive-main">
+<section class="domain-card"><div class="domain-card-heading"><div><h2>主动关心，按你的节奏</h2><p>天气、兴趣和你愿意聊起的事，分别由你选择。</p></div></div>
+<div class="proactive-saved-state" role="status" aria-live="polite"><strong id="proactive-effective-state">正在核对设置…</strong><p id="proactive-readiness"></p></div>
+<form id="prefs" class="domain-form">
+<label class="domain-permission"><input type="checkbox" name="enabled" disabled><span><strong>允许按以下设置主动联系我</strong><small>只对你自己的朝夕账号和已绑定微信生效</small></span></label>
+<div id="categories"></div>
+<div class="proactive-settings-section"><h3>日常问候</h3><label class="proactive-check"><input type="checkbox" name="dailyGreetingEnabled"><span>允许这个智能体在合适的时候主动来聊两句</span></label><label>偏好联系时间（北京时间，作为参考）<input type="time" name="dailyGreetingTime" min="09:00" max="23:59" value="18:30" required></label><p class="domain-footnote">结合最近私聊、人设与角色近况生成生活分享，使用当月 Token 额度；个人事实记忆另行授权。独立选择并确认后开启。完成过一次真实微信互动、连接及会话凭证有效时尝试发送；仍遵守下方安静时段与次数限制。参考你常聊天的时间择机联系；忙时顺延，内容过时会重新生成，不要求发满次数。活跃习惯只记录开启期间的小时信息，保留最近14天，不保存聊天正文。</p></div>
+<div class="proactive-settings-section"><h3>统一的次数与时段</h3><p>各类问候共享当前智能体的次数上限，不按类别叠加。明确设定的计划提醒另计。</p>
+<div class="row"><label>主动问候每天最多 <input name="greetingLimit" type="number" min="0" max="5" required></label><label>两次问候至少间隔（分钟）<input name="cooldownMinutes" type="number" min="60" max="10080" step="1" required></label></div>
+<p class="domain-footnote">总上限最多 5 次，默认间隔 3 小时。可以调低次数、延长间隔；没有可靠新信息时不会凑次数。</p>
+<div class="row"><label>时区 <input name="timezone" required placeholder="Asia/Shanghai"></label><label>安静时段开始 <input name="quietStart" type="time" required></label><label>安静时段结束 <input name="quietEnd" type="time" required></label></div>
+<p class="domain-footnote">普通问候只在北京时间 09:00–24:00 内发送；你的安静时段还会进一步收紧。默认安静时段为北京时间 00:00–09:00。设备时区不会被当作城市。</p></div>
+<div class="proactive-settings-section"><h3>天气：先确认关注的城市</h3><label>天气城市 <input name="city" maxlength="100" placeholder="由你明确填写城市"></label><p id="weather-missing" class="proactive-field-note"></p>
+<details class="domain-help"><summary>确认天气位置坐标</summary><p>尚未接入城市搜索，也不会读取设备定位。仅填写城市时会保留为待配置；坐标必须由你核对，不会根据时区补全。</p><div class="row"><label>纬度 <input name="latitude" type="number" min="-90" max="90" step="any" inputmode="decimal"></label><label>经度 <input name="longitude" type="number" min="-180" max="180" step="any" inputmode="decimal"></label></div><label class="proactive-check"><input id="weather-location-ack" type="checkbox"><span>我已核对这个城市与坐标，只将它用于天气资料。</span></label></details></div>
+<div class="proactive-settings-section"><h3>兴趣：选择你愿意聊的主题</h3><label>兴趣主题，每行一个 <textarea name="interests" maxlength="820" rows="3" placeholder="最多 20 个非敏感短主题，每个最多 40 字"></textarea></label><p class="domain-footnote">城市与兴趣可以先保留。天气和 AI 自动资讯暂不可用，当前不会自动查询或发送；聊天中的网页检索仍可正常使用。</p></div>
+<label class="proactive-check"><input id="proactive-source-ack" type="checkbox"><span>我已核对以上设置，确认资料来自本人的选择，并同意勾选的主动联系范围。</span></label>
+<p id="proactive-edit-state" class="proactive-field-note"></p>
+<div class="domain-form-actions"><button id="proactive-preview" class="primary" disabled>预览并核对设置</button><button type="button" id="pause">暂停主动消息</button><button type="button" id="off">关闭主动消息</button></div>
+</form><div id="preview" class="domain-confirm" aria-live="polite"></div><p id="proactive-feedback" role="status" aria-live="polite"></p><button id="proactive-refresh" type="button">刷新已保存状态</button></section>
+<section class="domain-card"><div class="domain-card-heading"><div><h2>记忆：只安排你审核过的一次跟进</h2><p>这不会开启读取聊天或自动记忆；读取聊天的权限需要另行明确同意。</p></div></div><p id="followup-availability" class="proactive-field-note"></p>
+<form id="proactive-followup" class="domain-form"><label>选择一条你已确认的事实 <select name="fact" required><option value="">请明确选择一条记录</option></select></label><label>这次跟进的简短用途 <input name="label" maxlength="40" required></label><label>希望开始跟进的时间（北京时间）<input name="at" type="datetime-local" required></label><p class="domain-footnote">只在所选时间起 6 小时内择机跟进，仍遵守北京时间 09:00–24:00、共享次数、间隔和安静时段；超时不补发。</p><button id="followup-preview" class="primary" disabled>预览这次跟进</button></form><div id="followup-preview-area" class="domain-confirm" aria-live="polite"></div><div id="followup-list"></div><p id="followup-feedback" role="status" aria-live="polite"></p><a class="proactive-memory-link" href="#memory">管理已保存的事实 →</a></section>
+</div><aside class="proactive-side"><section class="domain-card"><h2>当前资料与发送状态</h2><p class="domain-footnote">这里显示已保存设置的真实状态，编辑中的勾选尚未生效。</p><div id="proactive-source-status"></div><p id="proactive-last-check" class="domain-footnote"></p></section><section class="domain-card domain-settings-note"><h2>安静，也是一种选择</h2><p id="interaction-state"></p><button id="interaction-reset">结束当前聊天免打扰</button><details class="domain-help"><summary>许可和暂停各影响什么？</summary><p>这里的许可只决定是否按你确认的偏好主动发消息，不会同时开启自动记忆读取。暂停或关闭后停止后续主动消息；已经进入发送的消息可能无法撤回，结果不明时不会自动重发。</p><p>更正、删除、暂停相关事实或撤销这次用途，会使尚未发送的记忆跟进失效。已有聊天、其他记忆及发送次数记录不会因此被删除或重置。</p></details></section></aside></div>
+</section>
+</main><footer class="domain-footer">朝夕 · 把日子，一件件过好。</footer>
+</div>
+<script src="/static/user-message.js"></script>
+<script>
+const $=id=>document.getElementById(id),fPlan=$('plan-form');let current,editing=null;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const names={reminder:'课表与计划提醒',weather:'天气关心',interest:'兴趣话题',greeting:'计划完成后的问候',memory:'记忆的一次跟进'};
+const states={draft:'待确认',active:'已保存',cancelled:'已取消',completed:'已完成',pending:'等待到期或可发送时段',claimed:'准备发送',sending:'正在发送',sent:'已提交发送',unknown:'结果不明，等待核对',unknown_acknowledged:'已核对，不重发',expired:'已过期',accepted:'已提交发送',acknowledged:'已核对，不重发'};
+async function api(body){let r;try{const scope=await window.agentHeaders();r=await fetch('/api/me/domain',body?{method:'POST',headers:{...scope,'Content-Type':'application/json'},body:JSON.stringify(body)}:{headers:scope});}catch{throw Error('暂时连不上朝夕，请检查网络后重试。');}if(!r.ok){let data={};try{data=await r.json()}catch{}throw Error(window.userMessage(data.detail,r.status))}return r.json()}
+const DEFAULT_TIMEZONE='Asia/Shanghai';
+const request=()=>crypto.randomUUID();
+async function run(fn){try{await fn()}catch(e){$('status').textContent=window.userMessage(e.message)}}
+function localDate(ms,zone=DEFAULT_TIMEZONE){zone??=DEFAULT_TIMEZONE;const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(ms).map(p=>[p.type,p.value]));return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`}
+function zonedIso(value,zone=DEFAULT_TIMEZONE){if(!value)return null;const nominal=Date.parse(value+'Z');const matches=[...new Set([-86400000,0,86400000].map(d=>{const sample=nominal+d;return Date.parse(localDate(sample,zone)+'Z')-sample}))].map(offset=>nominal-offset).filter(ms=>localDate(ms,zone)===value);if(matches.length!==1)throw Error('此本地时间不存在或有夏令时歧义，请选择其他时间。');return new Date(matches[0]).toISOString()}
+function displayTime(value,zone=current?.preferences.timezone??DEFAULT_TIMEZONE){return localDate(new Date(value).getTime(),zone).replace('T',' ')+' '+zone}
+function resetPlan(){editing=null;fPlan.reset();fPlan.elements.timezone.value=current?.preferences.timezone??DEFAULT_TIMEZONE}
+async function refresh(){
+ const next=await api();if(current&&Number.isInteger(current.revision)&&Number.isInteger(next.revision)&&next.revision<current.revision)return;current=next;const p=current.preferences;
+ $('status').textContent='正在核对提醒和问候设置…';
+ $('plans').innerHTML=current.plans.map(p=>`<article class="domain-plan-item"><div class="domain-plan-title"><h3>${esc(p.title)}</h3><span class="domain-plan-state" data-status="${esc(p.status)}">${esc(states[p.status]||'状态待更新')}</span></div><p class="domain-plan-meta">${esc(localDate(Date.parse(p.dueAt),p.timezone).replace('T',' '))} · ${esc(p.timezone==='Asia/Shanghai'?'北京时间':p.timezone)}${p.location?' · '+esc(p.location):''}${p.outdoor===true?' · 本人确认的户外安排':''}${p.weatherCity?' · 天气城市：'+esc(p.weatherCity):''}</p><div class="domain-item-actions">${p.status==='draft'?`<button data-plan="${esc(p.id)}" data-revision="${p.revision}" data-action="plan.confirm">确认保存此草稿</button>`:''}${['active','draft'].includes(p.status)?`<button data-plan="${esc(p.id)}" data-action="edit">修改</button><button data-plan="${esc(p.id)}" data-revision="${p.revision}" data-action="plan.cancel">取消计划</button><button data-plan="${esc(p.id)}" data-revision="${p.revision}" data-action="plan.complete">标记完成</button>`:''}<button data-plan="${esc(p.id)}" data-revision="${p.revision}" data-action="delete">删除计划…</button></div></article>`).join('')||'<div class="domain-empty"><span aria-hidden="true">＋</span><h3>把接下来的小事，记在这里</h3><p>先写成草稿，确认后再提醒你。</p><button type="button" data-open-plan>新增计划</button></div>';
+
+
+ $('fact-drafts').innerHTML=(current.factDrafts||[]).map(d=>`<article><p>${esc(d.text)}</p><small>对话建议 · ${esc(displayTime(d.createdAt))} · 未保存</small><p><button data-fact-draft="${esc(d.id)}" data-revision="${d.revision}" data-nonce="${esc(d.confirmationNonce)}" data-action="confirm">确认保存这条偏好</button><button data-fact-draft="${esc(d.id)}" data-revision="${d.revision}" data-action="discard">丢弃草稿</button></p></article>`).join('')||'<p class="domain-inline-empty">暂无待确认的信息。有新的建议时，会显示在这里。</p>';
+ $('interaction-state').textContent=current.interactionState?.active?'正在聊天，提醒和问候会稍后再发。':'提醒和问候只会在你允许且符合设置时发送。';
+ $('facts').innerHTML=(current.facts||[]).map(f=>`<article><textarea aria-label="事实内容" data-fact-text="${esc(f.id)}" maxlength="2000">${esc(f.text)}</textarea><p>来源：${esc(f.automatic?'对话中自动整理':f.sourceKind==='user-correction'?'本人纠正':f.sourceKind==='user-stated'?'本人明确提供':'推断')} · 更新：${esc(displayTime(f.sourceTime??f.sourceAt??f.observedAt))}</p><button data-fact="${esc(f.id)}" data-revision="${f.revision}" data-action="correct">保存纠正</button><button data-fact="${esc(f.id)}" data-revision="${f.revision}" data-action="delete">删除…</button></article>`).join('')||'<div class="domain-empty domain-empty-small"><span aria-hidden="true">✧</span><h3>慢慢记住，慢慢了解</h3><p>你可以先在下方保存一条事实或偏好。</p></div>';
+ $('fact-state').textContent=current.factMemoryPaused?'这份记录的新写入已暂停。':'记录保存可用，自动记忆另按上方授权设置执行。';$('fact-add').querySelector('button').disabled=Boolean(current.factMemoryPaused);$('fact-pause').textContent=current.factMemoryPaused?'恢复这份记录的新写入':'暂停这份记录的新写入';
+ $('reminder-heading').textContent=current.shadowOnly?'待发送提醒（自动发送未启用）':'提醒执行记录';
+ $('reminders').innerHTML=current.reminders.map(r=>`<article>${esc(r.source==='daily-greeting'?'日常主动关心':r.category==='greeting'?'计划完成后的轻问候':r.title)} · ${esc(r.source==='daily-greeting'&&r.status==='pending'?'等待合适的联系时机':localDate(r.deliveryAttemptAt??r.sentAt??r.at,p.timezone||DEFAULT_TIMEZONE).replace('T',' ')+' '+(p.timezone||DEFAULT_TIMEZONE))} · ${esc(states[r.status]||'状态待更新')}${current.shadowOnly?'（不会实际发送）':''}</article>`).join('')||'<p class="domain-inline-empty">还没有发送记录。</p>';
+ $('dispatches').innerHTML=(current.dispatchAttempts||[]).filter(a=>a.status==='unknown').map(a=>`<article>有 ${a.reminderCount} 条消息的发送结果不明，不会重发，后续独立安排仍按设置执行。<button data-attempt="${esc(a.id)}">标记已核对，不重发</button></article>`).join('');
+ document.dispatchEvent(new CustomEvent('domain-refreshed',{detail:current}));
+}
+$('plans').onclick=e=>{const b=e.target.closest('[data-plan]');if(!b)return;run(async()=>{const p=current.plans.find(p=>p.id===b.dataset.plan);if(b.dataset.action==='edit'){editing=p;for(const k of ['title','kind','timezone','location','notes'])fPlan.elements[k].value=p[k]??'';fPlan.elements.due.value=localDate(Date.parse(p.dueAt),p.timezone);fPlan.elements.end.value=p.endAt?localDate(Date.parse(p.endAt),p.timezone):'';fPlan.elements.frequency.value=p.repeat?.frequency??'';fPlan.elements.weekParity.value=p.repeat?.weekParity??'all';fPlan.elements.termStart.value=p.repeat?.termStart??'';$('plan-editor').open=true;fPlan.scrollIntoView({behavior:'smooth'});return}if(b.dataset.action==='delete'){$('plan-confirm').innerHTML='<p>永久删除此计划，并取消其尚未发送的提醒？</p><button id="plan-delete-confirm">确认删除此计划</button><button id="plan-delete-cancel">保留计划</button>';$('plan-delete-cancel').onclick=()=>{$('plan-confirm').textContent=''};$('plan-delete-confirm').onclick=()=>run(async()=>{await api({action:'plan.delete',id:p.id,expectedRevision:p.revision,requestId:request()});$('plan-confirm').textContent='已删除。';await refresh()});return}await api({action:b.dataset.action,id:p.id,expectedRevision:p.revision,requestId:request()});await refresh()})};
+fPlan.onsubmit=e=>{e.preventDefault();run(async()=>{const f=fPlan.elements,value={title:f.title.value,kind:f.kind.value,timezone:f.timezone.value,dueAt:zonedIso(f.due.value,f.timezone.value),location:f.location.value,notes:f.notes.value};if(f.end.value)value.endAt=zonedIso(f.end.value,f.timezone.value);else if(editing?.endAt)value.endAt=null;if(f.frequency.value){value.repeat={...(editing?.repeat??{}),frequency:f.frequency.value,interval:editing?.repeat?.interval??1};if(f.weekParity.value!=='all'){if(!f.termStart.value)throw Error('单双周需要填写学期第一周周一。');value.repeat.weekParity=f.weekParity.value;value.repeat.termStart=f.termStart.value;}}else if(editing?.repeat)value.repeat=null;await api({action:editing?'plan.update':'plan.create',id:editing?.id??request(),expectedRevision:editing?.revision,requestId:request(),value});resetPlan();await refresh()})};
+$('new-plan').onclick=resetPlan;
+
+
+$('dispatches').onclick=e=>{const b=e.target.closest('[data-attempt]');if(b)run(async()=>{await api({action:'reminder.acknowledge',id:b.dataset.attempt,expectedRevision:current.revision,requestId:request()});await refresh()})};
+$('interaction-reset').onclick=()=>run(async()=>{await api({action:'interaction.reset',requestId:request()});await refresh()});
+$('fact-drafts').onclick=e=>{const b=e.target.closest('[data-fact-draft]');if(b)run(async()=>{await api({action:b.dataset.action==='confirm'?'fact.confirm':'fact.discard',id:b.dataset.factDraft,expectedRevision:Number(b.dataset.revision),requestId:request(),...(b.dataset.action==='confirm'?{value:{nonce:b.dataset.nonce}}:{})});await refresh()})};
+$('fact-add').onsubmit=e=>{e.preventDefault();run(async()=>{await api({action:'fact.add',id:request(),requestId:request(),value:{text:e.target.elements.text.value}});e.target.reset();await refresh()})};
+$('fact-pause').onclick=()=>run(async()=>{await api({action:current.factMemoryPaused?'fact.resume':'fact.pause',requestId:request()});await refresh()});
+$('facts').onclick=e=>{const b=e.target.closest('[data-fact]');if(!b)return;run(async()=>{const id=b.dataset.fact,revision=Number(b.dataset.revision);if(b.dataset.action==='correct'){await api({action:'fact.correct',id,expectedRevision:revision,requestId:request(),value:{text:b.closest('article').querySelector('textarea').value}});await refresh()}else{const d=await api({action:'fact.delete.prepare',id,expectedRevision:revision,requestId:request()});$('fact-confirm').innerHTML='<p>永久删除这里的这条记录？此操作无法撤销，不会清除聊天中记住的其他内容，也不会删除微信聊天记录。</p><button id="delete-confirm">确认删除这条记录</button><button id="delete-cancel">保留</button>';$('delete-cancel').onclick=()=>{$('fact-confirm').textContent=''};$('delete-confirm').onclick=()=>run(async()=>{await api({action:'fact.delete.confirm',id,expectedRevision:revision,requestId:request(),value:{nonce:d.nonce}});$('fact-confirm').textContent='已删除。';await refresh()})}})};
+run(refresh);
+</script>
+<script src="/static/domain-ui.js"></script>
+<script src="/static/domain-proactive.js"></script>
+<script src="/static/domain-memory.js"></script>
+<script src="/static/domain-matters.js"></script>
+</body></html>

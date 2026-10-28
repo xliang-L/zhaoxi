@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f5f3ed">
+  <title>朝夕 · 管理台</title>
+  <link rel="icon" href="/static/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/admin.css">
+  <script src="/static/admin.js" type="module"></script>
+</head>
+<body>
+  <section id="auth" class="auth-shell" hidden>
+    <form id="auth-form" class="card auth-card">
+      <img src="/static/mark.svg" width="54" height="54" alt="朝夕">
+      <p class="eyebrow">ZHAOXI</p><h1 id="auth-title">登录管理台</h1>
+      <p id="auth-description" class="muted">管理你的微信助理。</p>
+      <label>管理员名<input name="username" required minlength="3" maxlength="40" autocomplete="username"></label>
+      <label>密码<input name="password" type="password" required minlength="8" maxlength="128" autocomplete="current-password"></label>
+      <button class="primary">进入管理台</button><p id="auth-feedback" role="alert"></p>
+    </form>
+  </section>
+  <div id="console" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="#wechat"><img src="/static/mark.svg" alt="" width="40" height="40"><span>朝夕<small>ZHAOXI</small></span></a>
+      <p class="nav-caption">管理台</p>
+      <nav aria-label="管理导航">
+        <a href="#wechat" data-nav="wechat">微信连接<span>↗</span></a>
+        <a href="#persona" data-nav="persona">人设<span>✧</span></a>
+        <a href="#stories" data-nav="stories">故事包<span>▤</span></a>
+        <a href="/my-plans">计划与记忆<span>↗</span></a>
+        <a href="#settings" data-nav="settings">模型与额度<span>⚙</span></a>
+      </nav>
+      <div class="sidebar-bottom"><p>住在微信里的个人助理。</p><button id="logout" class="text-button">退出登录</button></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div><p class="eyebrow">YOUR EVERYDAY</p><h1 id="page-title">微信连接</h1></div>
+        <div class="bot-picker"><label for="bot-select">当前机器人</label><select id="bot-select"></select><button id="add-bot" title="新增机器人">＋</button></div>
+      </header>
+      <p id="feedback" class="feedback" role="status" aria-live="polite"></p>
+      <div class="stats" id="stats"></div>
+      <section data-panel="wechat">
+        <div class="split">
+          <article class="card"><div class="section-heading"><div><h2>连接到微信</h2><p class="muted">扫码后在手机上确认。已有授权可以直接恢复连接。</p></div><span class="badge" id="connection-phase">未连接</span></div>
+            <div id="connection-body" class="connection-body"><div class="qr-placeholder">微信</div><p class="muted">先填写模型配置，再扫码绑定。</p></div>
+            <p id="connection-error" class="error" role="alert"></p>
+            <div class="actions"><button id="connect" class="primary">生成绑定二维码</button><button id="resume">恢复连接</button><button id="stop">暂停连接</button></div>
+            <form id="verify-form" class="inline-form" hidden><label>手机验证码<input name="code" inputmode="numeric" pattern="[0-9]{4,12}" required maxlength="12"></label><button>提交验证码</button></form>
+            <details><summary>重新绑定与解除连接</summary><p class="muted">重新扫码沿用当前机器人的人设、记忆和计划。新增机器人时，请在手机上选择新增，形成独立对话。</p><button id="disconnect" class="danger">移除本机微信凭证</button></details>
+          </article>
+          <aside class="card note"><h2>从一件小事开始</h2><ol><li>在「模型与额度」填写接口地址、模型名和密钥。</li><li>回到这里生成二维码，用自己的微信扫码。</li><li>发一句话，等她回复。</li></ol><p>日常问候和自动记忆需要在「计划与记忆」单独开启。提醒也可以直接在微信里安排，自然确认后生效。</p><a href="/my-plans">打开计划与记忆 →</a></aside>
+        </div>
+      </section>
+      <section data-panel="persona" hidden>
+        <form id="persona-form">
+          <div class="split"><div class="card"><div class="section-heading"><div><h2>角色是什么样的人</h2><p class="muted">这些内容会用于聊天和主动关心。保存后从下一轮对话开始使用。</p></div></div>
+            <label>名字<input name="name" maxlength="80" required></label>
+            <label>身份<textarea name="identity" rows="3" maxlength="6000" placeholder="怎么介绍自己，与用户是什么关系"></textarea></label>
+            <div class="field-grid"><label>性格<textarea name="personality" rows="5" maxlength="6000" placeholder="脾气、喜好、相处习惯"></textarea></label><label>说话方式<textarea name="speaking_style" rows="5" maxlength="6000" placeholder="语气、长短、表情、称呼"></textarea></label></div>
+            <label>生活与背景<textarea name="background" rows="5" maxlength="6000" placeholder="她住在哪里，平时做什么，最近在关心什么"></textarea></label>
+            <label>相处边界<textarea name="boundaries" rows="4" maxlength="6000" placeholder="哪些事情该先询问，哪些话题不主动提起"></textarea></label>
+          </div><aside class="card note"><h2>保持自己的写法</h2><p>可以直接修改下面的 SOUL 原文，也可以在左边补充细节。补充的字段会接在原文后面，预览中能看到最终内容。</p><label>载入起点<select id="persona-template"><option value="">保留当前内容</option><option value="dafeiyu">大肥鱼</option><option value="plain">简洁助理</option></select></label><p class="muted">载入模板只改编辑框，保存后才生效。各机器人的人设相互独立。</p><button type="button" id="preview-persona">预览最终人设</button></aside></div>
+          <article class="card advanced"><details open><summary>SOUL 原文</summary><textarea name="soul" class="code-editor" rows="16" maxlength="20000" required spellcheck="false"></textarea></details><pre id="persona-preview" hidden></pre><div class="form-footer"><span id="persona-state" class="muted">未保存的修改不会应用。</span><button class="primary">保存人设</button></div></article>
+        </form>
+      </section>
+      <section data-panel="stories" hidden>
+        <article class="card"><div class="section-heading"><div><h2>可插拔的故事素材</h2><p class="muted">导入 JSON 故事包，再选择启用。关闭后立即停止检索，普通聊天不受影响。</p></div><label class="file-button">导入故事包<input type="file" id="pack-file" accept=".json,application/json"></label></div>
+          <div id="pack-list" class="pack-grid"></div>
+        </article>
+        <article class="card note story-note"><h2>故事是素材，不是台词表</h2><p>只有用户愿意听故事或共创时，才按主题检索。每张卡分三层，可以停，也可以续；角色会结合人设和当下的对话改写。故事内容不会写成用户事实。</p><p>新导入的故事包默认关闭，最多32个。可导出已安装的包，在编辑器中按相同结构制作自己的素材。</p></article>
+      </section>
+      <section data-panel="settings" hidden>
+        <form id="settings-form" class="card"><div class="section-heading"><div><h2>模型服务</h2><p class="muted">支持 OpenAI 兼容的 Responses 与 Chat Completions 接口。</p></div><span id="key-state" class="badge"></span></div>
+          <label>API 地址<input name="api_base" type="url" placeholder="https://api.example.com/v1" maxlength="1000"></label>
+          <div class="field-grid"><label>模型名<input name="api_model" placeholder="服务商提供的模型 ID" maxlength="200"></label><label>接口类型<select name="api_style"><option value="responses">Responses</option><option value="chat_completions">Chat Completions</option></select></label></div>
+          <label>API Key<input name="api_key" type="password" maxlength="4096" autocomplete="new-password" placeholder="留空沿用已保存的密钥"></label>
+          <label class="check"><input type="checkbox" name="clear_api_key">清除已保存的密钥（用于无需密钥的本地服务）</label>
+          <div class="field-grid"><label>推理强度<select name="reasoning_effort"><option value="">由服务默认决定</option><option value="none">none</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></label><label>用户时区<input name="timezone" required placeholder="Asia/Shanghai" maxlength="80"></label></div>
+          <div class="field-grid"><label>模型上下文长度<input name="context_tokens" type="number" min="4096" max="2000000" required></label><label>单次输出 Token 上限<input name="max_tokens" type="number" min="256" max="131072" required></label></div>
+          <hr><h2>每月用量</h2><p class="muted">所有机器人共用这份月额度。按实际返回用量结算，包含聊天、主动关心和搜索中的模型调用；不是服务商账户余额。</p>
+          <label class="check"><input type="checkbox" name="unlimited">不限制每月 Token 数量</label>
+          <label>每月 Token 上限<input name="monthly_token_limit" type="number" min="0" max="1000000000000"></label>
+          <p class="muted">密钥只保存在服务器私有数据目录，不会在页面或导出中回显。保存模型配置会重新连接本应用的机器人；正在处理消息时请稍后再保存。</p>
+          <div class="form-footer"><span id="settings-state" class="muted"></span><button class="primary">保存并应用</button></div>
+        </form>
+      </section>
+      <footer>朝夕 · <a href="https://github.com/xliang-L/zhaoxi" target="_blank" rel="noopener">源代码</a></footer>
+    </main>
+  </div>
+</body>
+</html>

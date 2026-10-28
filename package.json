@@ -1,0 +1,23 @@
+{
+  "name": "zhaoxi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A self-hosted WeChat personal agent built on OpenClaw",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node scripts/build_extensions.mjs",
+    "test": "node --test tests/integration/*.test.mjs tests/domain/*.test.mjs tests/companion/*.test.mjs",
+    "check": "node --check src/zhaoxi/static/admin.js"
+  },
+  "dependencies": {
+    "qrcode-terminal": "0.12.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

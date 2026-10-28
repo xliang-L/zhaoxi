@@ -1,0 +1,20 @@
+{
+  "name": "dafeiyu-companion",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "openclaw": {
+    "extensions": [
+      "./index.mjs"
+    ]
+  },
+  "license": "MIT",
+  "files": [
+    "index.mjs",
+    "stories.mjs",
+    "packs.mjs",
+    "packs/",
+    "skills/",
+    "openclaw.plugin.json"
+  ]
+}

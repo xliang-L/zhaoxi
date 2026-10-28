@@ -1,0 +1,59 @@
+{
+  "id": "zhaoxi-native",
+  "name": "朝夕现有网页检索",
+  "providers": ["zhaoxi"],
+  "contracts": {
+    "webSearchProviders": [
+      "zhaoxi-responses"
+    ],
+    "tools": [
+      "platform_search"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "quotaEnabled": {
+        "type": "boolean",
+        "default": false
+      },
+      "platformSearch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "platforms": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "xiaohongshu",
+                "wechat",
+                "weibo"
+              ]
+            },
+            "default": [
+              "xiaohongshu",
+              "wechat",
+              "weibo"
+            ]
+          },
+          "maxRequestsPerHour": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 120,
+            "default": 12
+          }
+        }
+      }
+    }
+  },
+  "activation": {
+    "onStartup": true
+  }
+}

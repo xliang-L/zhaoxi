@@ -1,0 +1,2899 @@
+--- a/docs/plugins/hooks/prompt-and-session.md
++++ b/docs/plugins/hooks/prompt-and-session.md
+@@ -149,6 +149,64 @@
+ compatibility; a plugin that requires it must handle an unsupported host
+ explicitly instead of substituting its own copy of the timeout budget.
+ 
++### Request-only memory context (review candidate)
++
++This local candidate adds `{ requiresMemoryAudience: true }` to
++`before_prompt_build` for plugins with explicitly applied
++`hooks.allowConversationAccess: true`. The host resolves the admitted session
++through the existing memory-audience owner, including non-owner conversation
++partitions. A legacy provider remains legacy; tools and sibling hooks gain no
++additional scope.
++
++Embedded prompt events use the admitted transcript recorder for
++`currentUserMessage` and its stable `currentUserMessageId`. Missing admission
++provides no identity. Prompt text, model output, transport correlation, and run IDs
++never substitute for the source.
++
++A plugin may return `ephemeralContext`, a read-only asynchronous reader receiving
++fresh `hookInvocation.assertActive()` custody for each foreground provider round.
++After a fresh exact-key plugin-state read, return `{ text, assertCurrent }` with
++live tenant, consent, audience, and plugin-instance checks. The host also retains
++source and publication checks until stream terminal. Temporary text is absent
++from transcript, `modelPromptProjection`, trajectory, compaction, and queued
++injections.
++
++Only a final-dispatch V1 contract obtained from the actual selected host factory
++permits reading and injecting context. The candidate certifies the OpenAI
++Responses, OpenAI Completions, Azure Responses, and Anthropic Messages factories.
++Unknown/custom and Google-owned provider streams have no certificate. Native
++Codex session streams retain their original route and currently receive no
++request-only memory. Their endpoint and headers are not interchangeable with the
++generic Responses factory. Already-sent fallback and client-compaction
++continuations also currently omit the original source-user fields and receive no
++memory.
++
++For certified requests, the existing guarded model HTTP owner checks current
++memory authority after asynchronous preparation and immediately before raw fetch.
++Only that owner signs the model-effect receipt; auxiliary authentication traffic
++does not. Ordinary fallback is allowed once after a specific memory refusal only
++when no model effect was initiated and no content was published. A sent or
++uncertain request is not replayed on that basis. Private scopes use the existing
++managed HTTP route rather than an unproven WebSocket send path.
++
++Ordinary fact deletion applies to subsequent turns. An already-started reply may
++use a previously read snapshot; already-sent model input is not rolled back. New
++turns after successful deletion must not recover the fact from old projections,
++queued sources, or provider continuation caches. This does not relax authorization
++revocation, tenant isolation, or any existing host assertion. Existing stricter
++publication checks remain.
++
++Readers share a 4,096 UTF-8 byte request cap, including separators and capped by
++the context-token budget. Plugins should apply a smaller relevant-fact budget.
++Errors, timeout, missing tracked reads, retirement, or exceeded budgets omit memory
++and preserve ordinary chat where its source remains authorized. The read
++capability authorizes no tools or other side effects.
++
++This is not a released capability. Source tests do not replace a rebuild and
++Gateway composition check of the final runtime. Host/SDK/security-owner review and
++an accepted compatibility version are required before distribution; the unchanged
++`2026.10.7` version alone cannot distinguish this candidate from the original host.
++
+ ### Authorized prompt enrichment
+ 
+ Register `before_prompt_build` with `requiresToolAuthority: true` when a plugin
+--- a/packages/ai/src/transports/openai-responses-client.continuation.integration.test.ts
++++ b/packages/ai/src/transports/openai-responses-client.continuation.integration.test.ts
+@@ -5,6 +5,8 @@
+ import { assert, describe, expect, it, onTestFinished } from "vitest";
+ import { awaitGateBeforeSettlement, createDeferred } from "../../../../test/helpers/promise.js";
+ import { makeTextToolResult } from "../../../../test/helpers/text-tool-result.js";
++import { configureAiTransportHost, getAiTransportHost } from "../host.js";
++import { cleanupSessionResources } from "../session-resources.js";
+ import { createOpenAIResponsesTransportStreamFn } from "./openai-responses-client.js";
+ import type { OpenAIResponsesOptions } from "./openai-responses-contracts.js";
+ import {
+@@ -85,6 +87,73 @@
+   const stream = await createOpenAIResponsesTransportStreamFn()(model, context, options);
+   return stream.result();
+ }
++
++it("does not revive removed request-only facts through a stored response on a new turn", async () => {
++  const originalHost = getAiTransportHost();
++  const sessionId = "deleted-ephemeral-continuation";
++  const requests: Array<Record<string, unknown>> = [];
++  const rawRequests: string[] = [];
++  // Replace external I/O only: the real SDK, body encoder, and continuation cache remain active.
++  const modelFetch: typeof fetch = async (input, init) => {
++    const request = new Request(input, init);
++    expect(request.url).toBe("https://api.openai.com/v1/responses");
++    expect(request.method).toBe("POST");
++    expect(request.headers.get("authorization")).toBe("Bearer synthetic-continuation-key");
++    const body = await request.text();
++    const payload: unknown = JSON.parse(body);
++    assert(isRecord(payload));
++    rawRequests.push(body);
++    requests.push(payload);
++    const events = responseEvents(false, `resp_ephemeral_${requests.length}`);
++    return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
++      headers: { "content-type": "text/event-stream" },
++    });
++  };
++  configureAiTransportHost({ buildModelFetch: () => modelFetch });
++  onTestFinished(() => {
++    cleanupSessionResources(sessionId);
++    configureAiTransportHost(originalHost);
++  });
++  const run = (messages: Context["messages"]) =>
++    respond(
++      { messages },
++      {
++        apiKey: "synthetic-continuation-key",
++        sessionId,
++        transport: "sse",
++        onPayload: (payload) => ({ ...(payload as Record<string, unknown>), store: true }),
++      },
++    );
++  const marker = "EPHEMERAL_FACT_SHANGHAI_6A19";
++  const firstUser = userMessage("First question.");
++  const first = await run([firstUser, userMessage(`常住城市：上海 ${marker}`, 1)]);
++  expect(first.stopReason).toBe("stop");
++  expect(requests[0]).not.toHaveProperty("previous_response_id");
++  expect(rawRequests[0]).toContain(marker);
++
++  // Deletion removes recall from the new request; already-sent input is not rolled back.
++  // Local history never contained the request-only fact, even though the server stored it.
++  const history: Context["messages"] = [firstUser, first, userMessage("After deletion.", 2)];
++  const second = await run(history);
++  expect(second.stopReason).toBe("stop");
++  expect(requests[1]).not.toHaveProperty("previous_response_id");
++  expect(requests[1]?.input).toHaveLength(3);
++  expect(requests[1]?.input).toEqual([
++    wireUser("First question."),
++    expect.objectContaining({ role: "assistant" }),
++    wireUser("After deletion."),
++  ]);
++  expect(rawRequests[1]).not.toContain(marker);
++
++  const third = await run([...history, second, userMessage("Continue safely.", 3)]);
++  expect(third.stopReason).toBe("stop");
++  expect(requests).toHaveLength(3);
++  expect(requests[2]).toMatchObject({
++    previous_response_id: "resp_ephemeral_2",
++    input: [wireUser("Continue safely.")],
++  });
++  expect(rawRequests[2]).not.toContain(marker);
++});
+ 
+ it.each([true, false])(
+   "keeps recorded three-step tool-loop prefixes byte-identical with store=%s",
+--- a/packages/ai/src/transports/provider-transport-stream.ts
++++ b/packages/ai/src/transports/provider-transport-stream.ts
+@@ -63,11 +63,34 @@
+   ["google-generative-ai", createProviderOwnedGoogleTransportStreamFn],
+ ]);
+ 
++/** Exact built-in factory provenance; caller options and copied properties cannot mint it. */
++export type FinalModelRequestDispatchContract = Readonly<{ version: 1 }>;
++const finalDispatchContract: FinalModelRequestDispatchContract = Object.freeze({ version: 1 });
++const finalDispatchStreams = new WeakMap<StreamFn, FinalModelRequestDispatchContract>();
++
++export function getFinalModelRequestDispatchContract(
++  stream: StreamFn | undefined,
++): FinalModelRequestDispatchContract | undefined {
++  return stream && finalDispatchStreams.get(stream);
++}
++
+ function createSupportedTransportStreamFn(
+   model: Model,
+   ctx?: ProviderTransportStreamContext,
+ ): StreamFn | undefined {
+-  return TRANSPORT_STREAM_FACTORIES.get(model.api)?.(model, ctx);
++  const factory = TRANSPORT_STREAM_FACTORIES.get(model.api);
++  const stream = factory?.(model, ctx);
++  // Google delegates to plugin code; its API name cannot certify the final send owner.
++  if (
++    stream &&
++    (factory === createOpenAIResponsesTransportStreamFn ||
++      factory === createOpenAICompletionsTransportStreamFn ||
++      factory === createAzureOpenAIResponsesTransportStreamFn ||
++      factory === createAnthropicMessagesTransportStreamFn)
++  ) {
++    finalDispatchStreams.set(stream, finalDispatchContract);
++  }
++  return stream;
+ }
+ 
+ /** Maps public model APIs to the internal transport API id used by simple runtime dispatch. */
+@@ -93,7 +116,7 @@
+       `Model-provider request.proxy/request.tls/localService is not yet supported for api "${model.api}"`,
+     );
+   }
+-  const streamFn = createStream(model, ctx);
++  const streamFn = createSupportedTransportStreamFn(model, ctx);
+   if (!streamFn) {
+     throw new Error(`Managed transport stream is unavailable for api "${model.api}"`);
+   }
+--- a/src/agents/embedded-agent-runner/run/attempt-memory-audience.test.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-memory-audience.test.ts
+@@ -4,7 +4,7 @@
+ const { fakeSessionOwner, fakeSessionGenerationModule, fakeSessionEntryReadModule } =
+   await vi.hoisted(() => import("../../../plugins/memory-audience.test-support.js"));
+ 
+-const mocks = vi.hoisted(() => ({ native: false, warn: vi.fn(), info: vi.fn() }));
++const mocks = vi.hoisted(() => ({ native: false, prompt: false, warn: vi.fn(), info: vi.fn() }));
+ 
+ // mock-isolation: the fake session owner replaces SQLite generation facts.
+ vi.mock(
+@@ -17,9 +17,17 @@
+ vi.mock("../../../plugins/memory-state.js", () => ({
+   resolveLoadedMemoryProviderKind: () => (mocks.native ? "native" : undefined),
+ }));
++// mock-isolation: the registered opt-in is resolved by the host hook owner.
++vi.mock("../../../plugins/hook-runner-global.js", () => ({
++  getGlobalHookRunner: () => ({ hasMemoryAudiencePromptBuildHooks: () => mocks.prompt }),
++}));
+ // mock-isolation: captures the attempt's log levels without emitting them.
+ vi.mock("../logger.js", () => ({ log: { warn: mocks.warn, info: mocks.info, debug: vi.fn() } }));
+ 
++import {
++  assertMemoryAudienceCurrent,
++  assertMemoryAudienceSession,
++} from "../../../plugins/memory-audience.js";
+ import { resolveEmbeddedAttemptMemoryAudience } from "./attempt-memory-audience.js";
+ 
+ const ROOT_KEY = "agent:main:root";
+@@ -63,6 +71,7 @@
+ 
+ beforeEach(() => {
+   mocks.native = false;
++  mocks.prompt = false;
+   mocks.warn.mockReset();
+   mocks.info.mockReset();
+   fakeSessionOwner.reset();
+@@ -111,3 +120,41 @@
+     expect.objectContaining({ kind: "ineligible", sessionKey: ROOT_KEY }),
+   );
+ });
++
++it("grants only an opt-in prompt audience for a non-owner legacy session and fences its lifetime", async () => {
++  mocks.prompt = true;
++  const root = { ...entry(), chatType: "direct" as const };
++  fakeSessionOwner.rows.set(ROOT_KEY, root);
++  const resolved = await resolveEmbeddedAttemptMemoryAudience({
++    ...attempt,
++    sessionKey: ROOT_KEY,
++    sessionId: root.sessionId,
++    admission: { entry: root, storePath: STORE_PATH },
++  });
++  expect(resolved.memoryAudience).toBeUndefined();
++  expect(resolved.promptMemoryAudience).toEqual({
++    kind: "conversation",
++    agentId: "main",
++    sessionKey: ROOT_KEY,
++    sessionId: root.sessionId,
++  });
++  const audience = resolved.promptMemoryAudience!;
++  expect(() => assertMemoryAudienceSession(audience, "agent:main:another-user")).toThrow(
++    "different session",
++  );
++  expect(() => assertMemoryAudienceCurrent(audience)).not.toThrow();
++  resolved.release();
++  expect(() => assertMemoryAudienceCurrent(audience)).toThrow("released");
++});
++
++it("rejects caller-shaped scope instead of minting authority from supplied fields", async () => {
++  const forged = {
++    kind: "conversation" as const,
++    agentId: "main",
++    sessionKey: ROOT_KEY,
++    sessionId: "forged",
++  };
++  await expect(
++    resolveEmbeddedAttemptMemoryAudience({ ...attempt, run: { memoryAudience: forged } }),
++  ).rejects.toThrow("host-minted");
++});
+--- a/src/agents/embedded-agent-runner/run/attempt-memory-audience.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-memory-audience.ts
+@@ -2,6 +2,7 @@
+ import type { SessionEntry } from "../../../config/sessions/types.js";
+ import type { OpenClawConfig } from "../../../config/types.openclaw.js";
+ import { readScheduledMemoryParent } from "../../../cron/execution-context-registry.js";
++import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
+ import {
+   assertMemoryAudienceSession,
+   isHostMemoryAudience,
+@@ -20,6 +21,7 @@
+   config?: OpenClawConfig;
+   senderIsOwner?: boolean;
+   admittedRunContext?: AdmittedRunContext;
++  trigger?: string;
+ };
+ 
+ /**
+@@ -35,7 +37,11 @@
+   sessionId: string;
+   admission?: { entry: SessionEntry; storePath: string };
+   assertCallerCurrent?: () => void;
+-}): Promise<{ memoryAudience?: MemoryAudience; release: () => void }> {
++}): Promise<{
++  memoryAudience?: MemoryAudience;
++  promptMemoryAudience?: MemoryAudience;
++  release: () => void;
++}> {
+   const { run } = params;
+   if (run.memoryAudience) {
+     if (!isHostMemoryAudience(run.memoryAudience)) {
+@@ -45,11 +51,16 @@
+     assertMemoryAudienceSession(run.memoryAudience, params.sessionKey);
+     return { memoryAudience: run.memoryAudience, release: retainedAudience };
+   }
+-  // Detached maintenance runs use their explicit delegation instead of deriving
+-  // access from the maintenance copy's deliberately non-owner sender bit. Only a
+-  // native memory provider consumes audiences; legacy owners resolve none, so
+-  // their turns take no session leases and read no lineage.
+-  if (!params.admission || resolveLoadedMemoryProviderKind(run.config ?? {}) !== "native") {
++  // A prompt-only grant never enters legacy memory tools or sibling hooks.
++  // Registration is host-filtered by applied conversation access before this query.
++  const nativeProvider = resolveLoadedMemoryProviderKind(run.config ?? {}) === "native";
++  const promptNeedsAudience =
++    getGlobalHookRunner()?.hasMemoryAudiencePromptBuildHooks({
++      agentId: params.agentId,
++      sessionKey: params.sessionKey,
++      trigger: run.trigger,
++    }) === true;
++  if (!params.admission || (!nativeProvider && !promptNeedsAudience)) {
+     return { release: retainedAudience };
+   }
+   const resolution = await resolveMemoryAudienceFromEntry(
+@@ -67,7 +78,12 @@
+     params.admission.entry,
+   );
+   if (resolution.status === "granted") {
+-    return { memoryAudience: resolution.audience, release: resolution.release };
++    return {
++      ...(nativeProvider
++        ? { memoryAudience: resolution.audience }
++        : { promptMemoryAudience: resolution.audience }),
++      release: resolution.release,
++    };
+   }
+   // A denial grants no private or conversation memory, and memory tools then
+   // fail pointing at this entry. Stale lineage warns because its reason names
+--- a/src/agents/embedded-agent-runner/run/attempt-prompt-build.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-prompt-build.ts
+@@ -10,7 +10,12 @@
+   freezeDiagnosticTraceContext,
+ } from "../../../infra/diagnostic-trace-context.js";
+ import type { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
++import {
++  assertMemoryAudienceCurrent,
++  assertMemoryAudienceSession,
++} from "../../../plugins/memory-audience.js";
+ import { buildInterSessionPromptContext } from "../../../sessions/input-provenance.js";
++import { getUserTurnTranscriptAdmissionOwner } from "../../../sessions/user-turn-transcript-admission.js";
+ import { joinPresentTextSegments } from "../../../shared/text/join-segments.js";
+ import { resolveAdmittedRunActiveAssertion } from "../../admitted-run-context.js";
+ import { DEFAULT_CONTEXT_TOKENS } from "../../defaults.js";
+@@ -107,6 +112,17 @@
+       ? AbortSignal.any([attemptAbortSignal, runAbortSignal])
+       : (attemptAbortSignal ?? runAbortSignal);
+   activeAbortSignal?.throwIfAborted();
++  const assertAdmittedActive = resolveAdmittedRunActiveAssertion(
++    attempt.admittedRunContext,
++    activeAbortSignal,
++  );
++  const assertHostActive = attempt.authProfileBinding
++    ? () => {
++        assertAdmittedActive?.();
++        attempt.authProfileBinding?.assertCurrent();
++      }
++    : assertAdmittedActive;
++  assertHostActive?.();
+ 
+   const isSettledTurnFinalization = attempt.operation === "settled-tool-finalization";
+   const preserveExactPrompt = input.isRawModelRun || isSettledTurnFinalization;
+@@ -146,27 +162,66 @@
+     inputProvenance: attempt.inputProvenance,
+   };
+   const promptBuildMessages = input.activeSession.messages;
+-  const promptEvent = { prompt: effectivePrompt, messages: promptBuildMessages };
++  // Skipping a duplicate append does not replace this logical turn's original source.
++  // Only the recorder factory's private custody can supply hook identity or text.
++  const sourceOwner =
++    attempt.userTurnTranscriptRecorder &&
++    getUserTurnTranscriptAdmissionOwner(attempt.userTurnTranscriptRecorder);
++  const sourceReceipt = sourceOwner?.receipt();
++  const sourceMessage = sourceOwner?.message();
++  const currentMessage =
++    !preserveExactPrompt &&
++    attempt.inputProvenance?.kind === "external_user" &&
++    sourceOwner &&
++    !sourceOwner.blocked() &&
++    sourceReceipt &&
++    sourceReceipt.agentId === input.sessionAgentId &&
++    sourceReceipt.agentId === input.hookAgentId &&
++    sourceReceipt.sessionKey === attempt.sessionKey &&
++    sourceReceipt.sessionId === attempt.sessionId &&
++    (!sourceMessage?.provenance || sourceMessage.provenance.kind === "external_user") &&
++    sourceMessage?.excludeFromContext !== true
++      ? sourceMessage
++      : undefined;
++  const currentUserMessage = currentMessage
++    ? typeof currentMessage.content === "string"
++      ? currentMessage.content
++      : currentMessage.content
++          .flatMap((part) => (part.type === "text" ? [part.text] : []))
++          .join("\n")
++    : undefined;
++  const promptEvent = {
++    prompt: effectivePrompt,
++    messages: promptBuildMessages,
++    ...(currentUserMessage !== undefined ? { currentUserMessage } : {}),
++    ...(currentMessage?.idempotencyKey
++      ? { currentUserMessageId: currentMessage.idempotencyKey }
++      : {}),
++  };
++  const promptAudience = attempt.promptMemoryAudience;
++  const memoryContext = promptAudience
++    ? {
++        memoryAudience: promptAudience,
++        assertMemoryAudienceCurrent: () => {
++          assertMemoryAudienceSession(promptAudience, attempt.sessionKey);
++          assertMemoryAudienceCurrent(promptAudience);
++        },
++      }
++    : undefined;
++  memoryContext?.assertMemoryAudienceCurrent();
+   const hookResult = preserveExactPrompt
+     ? undefined
+     : await resolvePromptBuildHookResult({
+         config: attempt.config ?? getRuntimeConfig(),
+         prompt: effectivePrompt,
+         messages: promptBuildMessages,
++        currentUserMessage: promptEvent.currentUserMessage,
++        currentUserMessageId: promptEvent.currentUserMessageId,
++        memoryContext,
+         hookCtx,
+         hookRunner: input.hookRunner,
+       });
+ 
+-  const assertAdmittedActive = resolveAdmittedRunActiveAssertion(
+-    attempt.admittedRunContext,
+-    activeAbortSignal,
+-  );
+-  const assertHostActive = attempt.authProfileBinding
+-    ? () => {
+-        assertAdmittedActive?.();
+-        attempt.authProfileBinding?.assertCurrent();
+-      }
+-    : assertAdmittedActive;
+   assertHostActive?.();
+   const hasPendingActionInstructions = Boolean(
+     // Authorized enrichment runs after policy; do not pre-empt its required actions.
+@@ -234,6 +289,7 @@
+       ? undefined
+       : await hookRunner.runAuthorizedPromptBuild(promptEvent, hookCtx, {
+           toolAuthorityFingerprint: attempt.toolAuthorityFingerprint,
++          memoryContext,
+           activeToolNames: callableToolNames,
+           assertHostActive,
+         });
+@@ -326,6 +382,10 @@
+     ? currentUserAdmission.effectiveParentId
+     : input.sessionManager.getLeafId();
+ 
++  const ephemeralContexts = [
++    ...(hookResult?.ephemeralContexts ?? []),
++    ...(authorizedHookResult?.ephemeralContexts ?? []),
++  ];
+   return {
+     assertHostActive,
+     hookCtx,
+@@ -335,6 +395,7 @@
+     effectiveTranscriptPrompt,
+     originContext,
+     transcriptLeafId,
++    ...(ephemeralContexts.length ? { ephemeralContexts } : {}),
+   };
+ }
+ 
+--- a/src/agents/embedded-agent-runner/run/attempt-prompt-helpers.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-prompt-helpers.ts
+@@ -6,6 +6,7 @@
+   ContextEngineSessionTarget,
+ } from "../../../context-engine/types.js";
+ import type { HookRunner } from "../../../plugins/hooks.js";
++import type { EphemeralPromptContext } from "../../../plugins/prompt-ephemeral-context.js";
+ import type {
+   PluginHookAgentContext,
+   PluginHookBeforePromptBuildResult,
+@@ -33,6 +34,7 @@
+ export type ResolvedPromptBuildHookResult = PluginHookBeforePromptBuildResult & {
+   decisionPromptBuildFields?: DecisionPromptBuildFields;
+   hasPendingNonPromptBuildContext: boolean;
++  ephemeralContexts?: EphemeralPromptContext[];
+ };
+ 
+ type PromptBuildHookRunner = Pick<HookRunner, "runBeforePromptBuild"> &
+@@ -45,6 +47,9 @@
+   prompt: string;
+   messages: unknown[];
+   hookCtx: PluginHookAgentContext;
++  currentUserMessage?: string;
++  currentUserMessageId?: string;
++  memoryContext?: Pick<PluginHookAgentContext, "memoryAudience" | "assertMemoryAudienceCurrent">;
+   hookRunner?: PromptBuildHookRunner | null;
+ }): Promise<ResolvedPromptBuildHookResult> {
+   const turnContext = await resolvePluginTurnContext(params);
+@@ -58,8 +63,15 @@
+           {
+             prompt: params.prompt,
+             messages: params.messages,
++            ...(params.currentUserMessage !== undefined
++              ? { currentUserMessage: params.currentUserMessage }
++              : {}),
++            ...(params.currentUserMessageId
++              ? { currentUserMessageId: params.currentUserMessageId }
++              : {}),
+           },
+           params.hookCtx,
++          params.memoryContext,
+         )
+         .catch(logHookFailure("before_prompt_build"))
+     : undefined;
+@@ -90,6 +102,7 @@
+     ...(decisionPromptBuildFields && Object.keys(decisionPromptBuildFields).length > 0
+       ? { decisionPromptBuildFields }
+       : {}),
++    ephemeralContexts: promptBuildResult?.ephemeralContexts,
+     systemPrompt: promptBuildResult?.systemPrompt,
+     ...(promptBuildResult?.toolsAllow !== undefined
+       ? { toolsAllow: promptBuildResult.toolsAllow }
+--- a/src/agents/embedded-agent-runner/run/attempt-prompt-phase.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-prompt-phase.ts
+@@ -100,6 +100,7 @@
+       effectiveAgentTransport,
+       effectiveExtraParams,
+       streamStrategy,
++      finalModelDispatch,
+       compactionReplayEnabled,
+     },
+   } = sessionRuntime;
+@@ -439,6 +440,8 @@
+ 
+     if (!state.skipPromptSubmission) {
+       await submitEmbeddedAttemptPrompt({
++        finalModelDispatch,
++        ephemeralContexts: promptAssembly.ephemeralContexts,
+         ...(promptBuildAppendContext ? { appendContext: promptBuildAppendContext } : {}),
+         attempt,
+         registration: preparedStreamRuntime.stream.registration,
+--- /dev/null
++++ b/src/agents/embedded-agent-runner/run/attempt-prompt-submit.ephemeral-context.test.ts
+@@ -0,0 +1,746 @@
++import path from "node:path";
++import {
++  createBoundaryAwareStreamFnForModel,
++  getFinalModelRequestDispatchContract,
++} from "@openclaw/ai/transports";
++import { Type } from "typebox";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { awaitGateBeforeSettlement, createDeferred } from "../../../../test/helpers/promise.js";
++import { getRuntimeConfig } from "../../../config/config.js";
++import {
++  clearRuntimeConfigSnapshot,
++  setRuntimeConfigSnapshot,
++} from "../../../config/runtime-snapshot.js";
++import {
++  loadTranscriptEvents,
++  upsertSessionEntryCore,
++} from "../../../config/sessions/session-accessor.js";
++import type { AssistantMessage, Context, Model } from "../../../llm/types.js";
++import { createAssistantMessageEventStream } from "../../../llm/utils/event-stream.js";
++import {
++  createPluginStateKeyedStore,
++  createPluginStateSyncKeyedStore,
++} from "../../../plugin-state/plugin-state-store.js";
++import type { PluginHookBeforePromptBuildEvent } from "../../../plugins/hook-before-agent-start.types.js";
++import { createHookRunner } from "../../../plugins/hooks.js";
++import type { EphemeralPromptContext } from "../../../plugins/prompt-ephemeral-context.js";
++import { createUserTurnTranscriptRecorder } from "../../../sessions/user-turn-transcript.js";
++import { readModelPromptProjection } from "../../../sessions/user-turn-transcript.message.js";
++import {
++  withOpenClawTestState,
++  type OpenClawTestState,
++} from "../../../test-utils/openclaw-test-state.js";
++import { prepareSystemAgentRunAdmission } from "../../admitted-run-context.js";
++import { forgetPromptBuildDrainCacheForRun } from "../../plugin-turn-context.js";
++import { buildGuardedModelFetch } from "../../provider-transport-fetch.js";
++import { guardSessionManager } from "../../session-tool-result-guard-wrapper.js";
++import {
++  createAssistant,
++  createAssistantResultStream,
++  createTestSession,
++  registerAgentSessionLoopTestLifecycle,
++  streamMocks,
++  testModel,
++} from "../../sessions/agent-session-loop-correctness.test-support.js";
++import { withSessionManagerWrite } from "../../sessions/session-manager-write-admission.js";
++import { SessionManager } from "../../sessions/session-manager.js";
++import { createPromptCacheRequestObserver } from "../prompt-cache-request-observer.js";
++import { clearEmbeddedSessionPromptStates } from "../session-prompt-state.js";
++import { resolveEmbeddedAgentStream } from "../stream-resolution.js";
++import { normalizeMessagesForLlmBoundary } from "./attempt-llm-boundary.js";
++import { prepareEmbeddedAttemptPromptAssembly } from "./attempt-prompt-build.js";
++import { submitEmbeddedAttemptPrompt } from "./attempt-prompt-submit.js";
++import { createBaseInput, sessionId } from "./attempt-prompt-submit.test-support.js";
++import { createUserTranscriptContextRegistry } from "./attempt-user-transcript-context-registry.js";
++
++registerAgentSessionLoopTestLifecycle();
++
++type Submission = Parameters<typeof submitEmbeddedAttemptPrompt>[0];
++type Session = Awaited<ReturnType<typeof createTestSession>>["session"];
++type MemoryFact = { text: string; enabled: boolean };
++type FactStore = { lookup(key: string): Promise<MemoryFact | undefined> };
++const wireRequests: string[] = [];
++
++beforeEach(() => {
++  wireRequests.length = 0;
++  vi.stubGlobal(
++    "fetch",
++    vi.fn<typeof fetch>(async (_input, init) => {
++      const body = init?.body;
++      wireRequests.push(
++        typeof body === "string"
++          ? body
++          : new TextDecoder().decode(body instanceof Uint8Array ? body : undefined),
++      );
++      return new Response("ok");
++    }),
++  );
++});
++
++async function consumeAtModelEgress(model: Model, context: Context) {
++  const response = await buildGuardedModelFetch(model, undefined, { sanitizeSse: false })(
++    `${model.baseUrl}/responses`,
++    { method: "POST", body: JSON.stringify(context) },
++  );
++  await response.text();
++}
++
++// ApiProvider's stream must be returned synchronously; only its producer may await I/O.
++function providerResult(model: Model, produce: () => Promise<AssistantMessage>) {
++  const output = createAssistantMessageEventStream();
++  void produce().then(
++    (message) => {
++      if (message.stopReason === "error" || message.stopReason === "aborted") {
++        output.push({ type: "error", reason: message.stopReason, error: message });
++      } else {
++        output.push({ type: "done", reason: message.stopReason, message });
++      }
++      output.end(message);
++    },
++    (error: unknown) => {
++      const message = createAssistant(model, [], "error");
++      message.errorMessage = error instanceof Error ? error.message : String(error);
++      output.push({ type: "error", reason: "error", error: message });
++      output.end(message);
++    },
++  );
++  return output;
++}
++
++function stores(state: OpenClawTestState) {
++  const options = { namespace: "ephemeral-facts", maxEntries: 20, env: state.env };
++  return {
++    reader: createPluginStateKeyedStore<MemoryFact>("ephemeral-test", options),
++    writer: createPluginStateSyncKeyedStore<MemoryFact>("ephemeral-test", options),
++  };
++}
++
++function factContext(
++  store: FactStore,
++  tenant: string,
++  afterRead?: () => Promise<void>,
++): EphemeralPromptContext {
++  return {
++    assertCurrent() {},
++    async read({ hookInvocation }) {
++      hookInvocation.assertActive();
++      const fact = await store.lookup(tenant);
++      await afterRead?.();
++      hookInvocation.assertActive();
++      return fact?.enabled
++        ? { text: fact.text, assertCurrent: () => hookInvocation.assertActive() }
++        : undefined;
++    },
++  };
++}
++
++function submit(session: Session, input: Partial<Submission> = {}) {
++  return submitEmbeddedAttemptPrompt({
++    ...createBaseInput(),
++    activeSession: session,
++    appendContext: undefined,
++    prependContext: undefined,
++    modelPrompt: "ordinary request",
++    transcriptPrompt: "ordinary request",
++    withTranscriptWrite: (write) => withSessionManagerWrite(session.sessionManager, write),
++    promptActiveSession: (prompt, options) => session.prompt(prompt, options),
++    finalModelDispatch: getFinalModelRequestDispatchContract(
++      createBoundaryAwareStreamFnForModel(testModel),
++    ),
++    ...input,
++  });
++}
++
++function captureRequests() {
++  const requests: Context["messages"][] = [];
++  streamMocks.streamSimple.mockImplementation((model, context) =>
++    providerResult(model, async () => {
++      await consumeAtModelEgress(model, context);
++      requests.push(structuredClone(context.messages));
++      return createAssistant(model, "ordinary answer");
++    }),
++  );
++  return requests;
++}
++
++async function recordedSession(state: OpenClawTestState, label: string) {
++  const target = {
++    agentId: label,
++    sessionId: `ephemeral-${label}`,
++    sessionKey: `agent:${label}:ephemeral`,
++    storePath: path.join(state.agentDir(label), "openclaw-agent.sqlite"),
++  };
++  await upsertSessionEntryCore(target, { sessionId: target.sessionId, updatedAt: 1 });
++  const manager = await SessionManager.openAsync(target, state.workspaceDir);
++  const contexts = createUserTranscriptContextRegistry();
++  const { session } = await createTestSession({ sessionManager: manager });
++  const convert = session.agent.convertToLlm;
++  session.agent.convertToLlm = (messages) =>
++    convert(normalizeMessagesForLlmBoundary(messages, { userTranscriptContexts: contexts.list() }));
++  return {
++    session,
++    target,
++    async send(text: string, idempotencyKey: string, input: Partial<Submission> = {}) {
++      const recorder = createUserTurnTranscriptRecorder({
++        input: { text, timestamp: 1, idempotencyKey },
++        target: { ...target, sessionEntry: { sessionId: target.sessionId, updatedAt: 1 } },
++      });
++      guardSessionManager(manager, {
++        preparedUserTurnMessage: recorder.message,
++        preparedUserTurnTranscriptRecorder: recorder,
++        onUserMessagePersisted: (message, runtimeMessage) => {
++          if (runtimeMessage) {
++            contexts.record(runtimeMessage, message);
++          }
++        },
++      });
++      await submit(session, {
++        attempt: { ...target, userTurnTranscriptRecorder: recorder },
++        modelPrompt: text,
++        transcriptPrompt: text,
++        getUserTranscriptContexts: () => contexts.list(),
++        ...input,
++      });
++      return recorder;
++    },
++  };
++}
++
++async function assembleCurrentUserSource(
++  active: Awaited<ReturnType<typeof recordedSession>>,
++  runId: string,
++  overrides: Partial<Parameters<typeof prepareEmbeddedAttemptPromptAssembly>[0]["attempt"]> = {},
++) {
++  const admission = prepareSystemAgentRunAdmission({}, runId, active.target.agentId, "source-test");
++  const events: PluginHookBeforePromptBuildEvent[] = [];
++  try {
++    await prepareEmbeddedAttemptPromptAssembly({
++      attempt: {
++        ...active.target,
++        admittedRunContext: await admission.admit("embedded"),
++        config: {},
++        model: testModel,
++        provider: testModel.provider,
++        prompt: "Continue the existing request after compaction.",
++        transcriptPrompt: "Continue the existing request after compaction.",
++        runId,
++        sessionPersistence: "detached",
++        trigger: "user",
++        workspaceDir: "/tmp/current-source-test",
++        skipPreparedUserTurnMessage: true,
++        inputProvenance: { kind: "external_user" },
++        ...overrides,
++      },
++      activeSession: active.session,
++      sessionManager: active.session.sessionManager,
++      hookRunner: createHookRunner({
++        hooks: [],
++        plugins: [],
++        typedHooks: [
++          {
++            pluginId: "source-test",
++            hookName: "before_prompt_build",
++            source: "test",
++            handler(event: PluginHookBeforePromptBuildEvent) {
++              events.push(event);
++            },
++          },
++        ],
++      }),
++      hookAgentId: active.target.agentId,
++      sessionAgentId: active.target.agentId,
++      diagnosticTrace: { traceId: "11111111111111111111111111111111" },
++      isRawModelRun: false,
++      runtimeModel: testModel.id,
++      systemPromptText: "Test system prompt",
++      runAbortSignal: new AbortController().signal,
++      hasBaselineTools: () => false,
++      applyPromptBuildToolsAllow: () => [],
++      setActiveSessionSystemPrompt() {},
++    });
++    return events;
++  } finally {
++    admission.close();
++    forgetPromptBuildDrainCacheForRun(runId);
++  }
++}
++
++afterEach(() => {
++  clearEmbeddedSessionPromptStates([sessionId]);
++  vi.unstubAllGlobals();
++  clearRuntimeConfigSnapshot();
++});
++
++describe("ephemeral memory at the provider boundary", () => {
++  it("retains the factory-admitted external user source when a same-turn continuation skips append", async () => {
++    await withOpenClawTestState(
++      { label: "continuation-current-source", prepareProfileCatalog: true },
++      async (state) => {
++        captureRequests();
++        const active = await recordedSession(state, "continuation-source");
++        const recorder = await active.send("ORIGINAL_EXTERNAL_SOURCE", "original:user");
++        const before = await loadTranscriptEvents(active.target);
++        const events = await assembleCurrentUserSource(active, "source-after-client-compaction", {
++          userTurnTranscriptRecorder: recorder,
++        });
++        expect(events).toHaveLength(1);
++        expect(events[0]).toMatchObject({
++          prompt: "Continue the existing request after compaction.",
++          currentUserMessage: "ORIGINAL_EXTERNAL_SOURCE",
++          currentUserMessageId: "original:user",
++        });
++        expect(await loadTranscriptEvents(active.target)).toEqual(before);
++      },
++    );
++  });
++
++  it("withholds current-user source from internal, mismatched, copied, or blocked recorder custody", async () => {
++    await withOpenClawTestState(
++      { label: "continuation-source-custody", prepareProfileCatalog: true },
++      async (state) => {
++        captureRequests();
++        const active = await recordedSession(state, "source-custody");
++        const recorder = await active.send("PRIVATE_EXTERNAL_SOURCE", "private:user");
++        const cases = [
++          {
++            inputProvenance: { kind: "internal_system" as const },
++            userTurnTranscriptRecorder: recorder,
++          },
++          { userTurnTranscriptRecorder: undefined },
++          { userTurnTranscriptRecorder: { ...recorder }, skipPreparedUserTurnMessage: false },
++          {
++            sessionKey: `agent:${active.target.agentId}:wrong`,
++            userTurnTranscriptRecorder: recorder,
++          },
++          { sessionId: "another-session", userTurnTranscriptRecorder: recorder },
++        ];
++        for (const [index, overrides] of cases.entries()) {
++          const events = await assembleCurrentUserSource(active, `no-source-${index}`, overrides);
++          expect(events).toHaveLength(1);
++          expect(events[0]).not.toHaveProperty("currentUserMessage");
++          expect(events[0]).not.toHaveProperty("currentUserMessageId");
++        }
++        await expect(
++          assembleCurrentUserSource(active, "wrong-agent-source", {
++            sessionKey: "agent:another:wrong",
++            userTurnTranscriptRecorder: recorder,
++          }),
++        ).rejects.toMatchObject({ code: "AGENT_SELECTION_REQUIRED" });
++        const excluded = createUserTurnTranscriptRecorder({
++          input: {
++            text: "EXCLUDED_EXTERNAL_SOURCE",
++            timestamp: 2,
++            idempotencyKey: "excluded:user",
++            excludeFromContext: true,
++          },
++          target: {
++            ...active.target,
++            sessionEntry: { sessionId: active.target.sessionId, updatedAt: 1 },
++          },
++        });
++        await excluded.persistApproved();
++        const excludedEvents = await assembleCurrentUserSource(active, "excluded-source", {
++          userTurnTranscriptRecorder: excluded,
++        });
++        expect(excludedEvents[0]).not.toHaveProperty("currentUserMessage");
++        expect(excludedEvents[0]).not.toHaveProperty("currentUserMessageId");
++        for (const kind of ["internal_system", "inter_session"] as const) {
++          const source = createUserTurnTranscriptRecorder({
++            input: {
++              text: "EXPLICIT_NON_EXTERNAL_SOURCE",
++              timestamp: 3,
++              idempotencyKey: `${kind}:source`,
++              provenance: { kind },
++            },
++            target: {
++              ...active.target,
++              sessionEntry: { sessionId: active.target.sessionId, updatedAt: 1 },
++            },
++          });
++          await source.persistApproved();
++          const typedEvents = await assembleCurrentUserSource(active, `${kind}-source`, {
++            userTurnTranscriptRecorder: source,
++          });
++          expect(typedEvents[0]).not.toHaveProperty("currentUserMessage");
++          expect(typedEvents[0]).not.toHaveProperty("currentUserMessageId");
++        }
++        recorder.markBlocked();
++        const events = await assembleCurrentUserSource(active, "blocked-source", {
++          userTurnTranscriptRecorder: recorder,
++        });
++        expect(events[0]).not.toHaveProperty("currentUserMessage");
++        expect(events[0]).not.toHaveProperty("currentUserMessageId");
++      },
++    );
++  });
++
++  it("supplies only the current provider request without freezing memory in history or projection", async () => {
++    await withOpenClawTestState({ label: "ephemeral-provider-history" }, async (state) => {
++      const { reader, writer } = stores(state);
++      const secret = "PRIVATE_EPHEMERAL_CITY_SHANGHAI";
++      writer.register("tenant-a", { text: secret, enabled: true });
++      const requests = captureRequests();
++      const active = await recordedSession(state, "history");
++      const memory = factContext(reader, "tenant-a");
++      const retainedInvocations: Array<() => void> = [];
++      const recorder = await active.send("first ordinary request", "first:user", {
++        ephemeralContexts: [
++          {
++            ...memory,
++            read(context) {
++              retainedInvocations.push(() => context.hookInvocation.assertActive());
++              return memory.read(context);
++            },
++          },
++        ],
++      });
++
++      expect(requests).toHaveLength(1);
++      expect(JSON.stringify(requests[0])).toContain(secret);
++      expect(retainedInvocations).toHaveLength(1);
++      expect(retainedInvocations[0]).toThrow("ephemeral prompt invocation is no longer active");
++      expect(JSON.stringify(active.session.messages)).not.toContain(secret);
++      expect(readModelPromptProjection(recorder.getPersistedMessage?.())).toBe(
++        "first ordinary request",
++      );
++      expect(JSON.stringify(await loadTranscriptEvents(active.target))).not.toContain(secret);
++
++      writer.delete("tenant-a");
++      await active.send("second ordinary request", "second:user", { ephemeralContexts: [memory] });
++      expect(active.session.getLastAssistantText()).toBe("ordinary answer");
++      expect(requests).toHaveLength(2);
++      expect(JSON.stringify(requests[1])).not.toContain(secret);
++      active.session.dispose();
++      const reopened = await SessionManager.openAsync(active.target, state.workspaceDir);
++      expect(JSON.stringify(reopened.getEntries())).not.toContain(secret);
++    });
++  });
++
++  it("drops a deleted or revoked fact after the last awaited observation and still answers", async () => {
++    await withOpenClawTestState({ label: "ephemeral-provider-invalidation" }, async (state) => {
++      const { reader, writer } = stores(state);
++      for (const change of ["delete", "revoke", "source-grant-revoke"] as const) {
++        const secret = `PRIVATE_${change.toUpperCase()}_BEFORE_HANDOFF`;
++        writer.register("tenant-a", { text: secret, enabled: true });
++        const requests = captureRequests();
++        const { session } = await createTestSession();
++        let changedAfterRead = false;
++        let sourceAllowed = true;
++        await submit(session, {
++          ephemeralContexts: [
++            {
++              ...factContext(reader, "tenant-a"),
++              assertCurrent() {
++                if (!sourceAllowed) {
++                  throw new Error("Synthetic memory source grant revoked");
++                }
++              },
++            },
++          ],
++          onModelRequest: async (_model, context) => {
++            if (!JSON.stringify(context.messages).includes(secret)) {
++              return;
++            }
++            changedAfterRead = true;
++            if (change === "delete") {
++              writer.delete("tenant-a");
++            } else if (change === "revoke") {
++              writer.register("tenant-a", { text: secret, enabled: false });
++            } else {
++              sourceAllowed = false;
++            }
++            await Promise.resolve();
++          },
++        });
++        expect(changedAfterRead, change).toBe(true);
++        expect(requests, change).toHaveLength(1);
++        expect(JSON.stringify(requests[0]), change).not.toContain(secret);
++        expect(session.getLastAssistantText(), change).toBe("ordinary answer");
++      }
++    });
++  });
++
++  it.each(["host-grant-revoke", "consent-revoke", "fact-version"] as const)(
++    "drops %s during the real transport credential wait before model network egress",
++    async (change) => {
++      await withOpenClawTestState({ label: "ephemeral-transport-auth" }, async (state) => {
++        const { reader, writer } = stores(state);
++        const secret = "PRIVATE_REVOKED_DURING_TRANSPORT_AUTH";
++        writer.register("tenant-a", { text: secret, enabled: true });
++        const setAccess = (allowed: boolean) =>
++          setRuntimeConfigSnapshot({
++            plugins: {
++              entries: {
++                "ephemeral-test": { enabled: true, hooks: { allowConversationAccess: allowed } },
++              },
++            },
++          });
++        setAccess(true);
++        const requests: Context["messages"][] = [];
++        const authStarted = createDeferred();
++        const credentials = createDeferred<string>();
++        const { session } = await createTestSession();
++        session.agent.streamFn = resolveEmbeddedAgentStream({
++          currentStreamFn: session.agent.streamFn,
++          providerStreamFn: async (model, context) => {
++            await consumeAtModelEgress(model, context);
++            requests.push(structuredClone(context.messages));
++            return createAssistantResultStream(createAssistant(model, "ordinary answer"));
++          },
++          sessionId: "ephemeral-transport-auth",
++          model: testModel,
++          authStorage: {
++            async getApiKey() {
++              authStarted.resolve();
++              return credentials.promise;
++            },
++          },
++          assertCurrent() {},
++        }).streamFn;
++        const pending = submit(session, {
++          ephemeralContexts: [
++            {
++              ...factContext(reader, "tenant-a"),
++              assertCurrent() {
++                if (
++                  getRuntimeConfig().plugins?.entries?.["ephemeral-test"]?.hooks
++                    ?.allowConversationAccess !== true
++                ) {
++                  throw new Error("Conversation access grant revoked");
++                }
++              },
++            },
++          ],
++        });
++        try {
++          await awaitGateBeforeSettlement(
++            authStarted.promise,
++            pending,
++            "Request settled before the real transport credential wait",
++          );
++          if (change === "host-grant-revoke") {
++            setAccess(false);
++          } else {
++            writer.register("tenant-a", {
++              text: change === "fact-version" ? "NEW_FACT_VERSION" : secret,
++              enabled: change !== "consent-revoke",
++            });
++          }
++        } finally {
++          credentials.resolve("synthetic-test-key");
++          await pending;
++        }
++        expect(requests).toHaveLength(1);
++        expect(JSON.stringify(requests[0])).not.toContain(secret);
++        expect(wireRequests).toHaveLength(1);
++        expect(wireRequests[0]).not.toContain(secret);
++        expect(session.getLastAssistantText()).toBe("ordinary answer");
++      });
++    },
++  );
++
++  it("keeps two interleaved tenants with the same admitted message ID separate", async () => {
++    await withOpenClawTestState({ label: "ephemeral-provider-tenants" }, async (state) => {
++      const { reader, writer } = stores(state);
++      writer.register("tenant-a", { text: "ONLY_TENANT_A_PHOTOGRAPHY", enabled: true });
++      writer.register("tenant-b", { text: "ONLY_TENANT_B_READING", enabled: true });
++      const requests = captureRequests();
++      const firstRead = createDeferred();
++      const secondFinished = createDeferred();
++      const a = await recordedSession(state, "tenant-a");
++      const b = await recordedSession(state, "tenant-b");
++      const first = a.send("request from tenant a", "same:user", {
++        ephemeralContexts: [
++          factContext(reader, "tenant-a", async () => {
++            firstRead.resolve();
++            await secondFinished.promise;
++          }),
++        ],
++      });
++      try {
++        await awaitGateBeforeSettlement(
++          firstRead.promise,
++          first,
++          "First tenant settled before its provider memory read",
++        );
++        await b.send("request from tenant b", "same:user", {
++          ephemeralContexts: [factContext(reader, "tenant-b")],
++        });
++        // A's consent changes while its request is pending; B's key/authority is unaffected.
++        writer.register("tenant-a", { text: "ONLY_TENANT_A_PHOTOGRAPHY", enabled: false });
++      } finally {
++        secondFinished.resolve();
++        await first;
++      }
++      expect(requests).toHaveLength(2);
++      const byTenant = (tenant: string) =>
++        requests.find((request) =>
++          JSON.stringify(request).includes(`request from tenant ${tenant}`),
++        );
++      expect(JSON.stringify(byTenant("a"))).not.toContain("ONLY_TENANT_A_PHOTOGRAPHY");
++      expect(JSON.stringify(byTenant("a"))).not.toContain("ONLY_TENANT_B_READING");
++      expect(JSON.stringify(byTenant("b"))).toContain("ONLY_TENANT_B_READING");
++      expect(JSON.stringify(byTenant("b"))).not.toContain("ONLY_TENANT_A_PHOTOGRAPHY");
++      expect(a.session.getLastAssistantText()).toBe("ordinary answer");
++      expect(b.session.getLastAssistantText()).toBe("ordinary answer");
++    });
++  });
++
++  it("does not replay an already sent model request when its next send loses memory authority", async () => {
++    await withOpenClawTestState({ label: "ephemeral-sent-no-replay" }, async (state) => {
++      const { reader, writer } = stores(state);
++      const secret = "ALREADY_SENT_PRIVATE_FACT";
++      writer.register("tenant-a", { text: secret, enabled: true });
++      let starts = 0;
++      const { session } = await createTestSession();
++      streamMocks.streamSimple.mockImplementation((model, context) =>
++        providerResult(model, async () => {
++          starts++;
++          await consumeAtModelEgress(model, context);
++          writer.register("tenant-a", { text: secret, enabled: false });
++          // The first effect already happened. A later SDK send must refuse without plain replay.
++          await consumeAtModelEgress(model, context);
++          return createAssistant(model, "ordinary answer");
++        }),
++      );
++      await Promise.allSettled([
++        submit(session, { ephemeralContexts: [factContext(reader, "tenant-a")] }),
++      ]);
++      expect(starts).toBe(1);
++      expect(wireRequests).toHaveLength(1);
++      expect(wireRequests[0]).toContain(secret);
++      expect(session.getLastAssistantText()).not.toBe("ordinary answer");
++    });
++  });
++
++  it("keeps an unproven selected transport on ordinary chat without reading memory", async () => {
++    await withOpenClawTestState({ label: "ephemeral-unproven-transport" }, async (state) => {
++      const { reader, writer } = stores(state);
++      writer.register("tenant-a", { text: "UNSUPPORTED_TRANSPORT_PRIVATE_FACT", enabled: true });
++      const requests = captureRequests();
++      const { session } = await createTestSession();
++      const memory = factContext(reader, "tenant-a");
++      const read = vi.fn(memory.read);
++      await submit(session, {
++        finalModelDispatch: undefined,
++        ephemeralContexts: [{ ...memory, read }],
++      });
++      expect(read).not.toHaveBeenCalled();
++      expect(JSON.stringify(requests)).not.toContain("UNSUPPORTED_TRANSPORT_PRIVATE_FACT");
++      expect(session.getLastAssistantText()).toBe("ordinary answer");
++    });
++  });
++
++  it("rereads current memory on every provider round of one tool loop", async () => {
++    await withOpenClawTestState({ label: "ephemeral-provider-rounds" }, async (state) => {
++      const { reader, writer } = stores(state);
++      writer.register("tenant-a", { text: "FACT_VERSION_ONE", enabled: true });
++      const requests: Context["messages"][] = [];
++      const requestIndexes: number[] = [];
++      const observer = createPromptCacheRequestObserver(
++        { sessionId: "ephemeral-provider-rounds", streamStrategy: "test" },
++        (observation) => requestIndexes.push(observation.requestIndex),
++      );
++      streamMocks.streamSimple.mockImplementation((model, context) =>
++        providerResult(model, async () => {
++          await consumeAtModelEgress(model, context);
++          requests.push(structuredClone(context.messages));
++          observer.onModelUsage({ input: 1, output: 1, cacheRead: 0, cacheWrite: 0 });
++          return requests.length === 1
++            ? createAssistant(
++                model,
++                [{ type: "toolCall", id: "change-fact", name: "change_fact", arguments: {} }],
++                "toolUse",
++              )
++            : createAssistant(model, "ordinary answer");
++        }),
++      );
++      const { session } = await createTestSession({
++        customTools: [
++          {
++            name: "change_fact",
++            label: "Change synthetic fact",
++            description: "Update a synthetic fixture between model rounds.",
++            parameters: Type.Object({}),
++            async execute() {
++              writer.register("tenant-a", { text: "FACT_VERSION_TWO", enabled: true });
++              return { content: [{ type: "text", text: "updated" }], details: {} };
++            },
++          },
++        ],
++      });
++      let reads = 0;
++      await submit(session, {
++        onModelRequest: async (...args) => {
++          await observer.onModelRequest(...args);
++        },
++        ephemeralContexts: [
++          factContext(reader, "tenant-a", async () => {
++            reads++;
++          }),
++        ],
++      });
++      expect(requests).toHaveLength(2);
++      expect(requestIndexes).toEqual([1, 2]);
++      expect(reads).toBe(2);
++      expect(JSON.stringify(requests[0])).toContain("FACT_VERSION_ONE");
++      expect(JSON.stringify(requests[0])).not.toContain("FACT_VERSION_TWO");
++      expect(JSON.stringify(requests[1])).toContain("FACT_VERSION_TWO");
++      expect(JSON.stringify(requests[1])).not.toContain("FACT_VERSION_ONE");
++      expect(session.getLastAssistantText()).toBe("ordinary answer");
++    });
++  });
++
++  it("fails closed for cached strings, lookup failures, and oversized results while chat continues", async () => {
++    await withOpenClawTestState({ label: "ephemeral-provider-failures" }, async (state) => {
++      const { reader, writer } = stores(state);
++      const secret = "PRIVATE_UNPUBLISHED_FACT";
++      writer.register("tenant-a", { text: secret, enabled: true });
++      const cases: Array<{ name: string; read: EphemeralPromptContext["read"] }> = [
++        { name: "untracked closure", read: async () => ({ text: secret, assertCurrent() {} }) },
++        {
++          name: "reader failure",
++          read: async () => {
++            await reader.lookup("tenant-a");
++            throw new Error("synthetic lookup consumer failed");
++          },
++        },
++        {
++          name: "oversized result",
++          read: async () => {
++            const fact = await reader.lookup("tenant-a");
++            return { text: `${fact?.text}${"x".repeat(4_097)}`, assertCurrent() {} };
++          },
++        },
++      ];
++      for (const entry of cases) {
++        const requests = captureRequests();
++        const { session } = await createTestSession();
++        await submit(session, { ephemeralContexts: [{ read: entry.read, assertCurrent() {} }] });
++        expect(requests, entry.name).toHaveLength(1);
++        expect(JSON.stringify(requests[0]), entry.name).not.toContain(secret);
++        expect(session.getLastAssistantText(), entry.name).toBe("ordinary answer");
++      }
++    });
++  });
++
++  it("bounds combined request memory when individual readers each fit", async () => {
++    await withOpenClawTestState({ label: "ephemeral-provider-budget" }, async (state) => {
++      const { reader, writer } = stores(state);
++      const first = `FIRST_MEMORY_${"a".repeat(2_048 - "FIRST_MEMORY_".length)}`;
++      const second = `SECOND_MEMORY_${"b".repeat(2_048 - "SECOND_MEMORY_".length)}`;
++      writer.register("first", { text: first, enabled: true });
++      writer.register("second", { text: second, enabled: true });
++      const requests = captureRequests();
++      const { session } = await createTestSession();
++      await submit(session, {
++        contextTokenBudget: 4_096,
++        ephemeralContexts: [factContext(reader, "first"), factContext(reader, "second")],
++      });
++      expect(requests).toHaveLength(1);
++      expect(JSON.stringify(requests[0])).toContain(first);
++      expect(JSON.stringify(requests[0])).not.toContain(second);
++      expect(session.getLastAssistantText()).toBe("ordinary answer");
++    });
++  });
++});
+--- a/src/agents/embedded-agent-runner/run/attempt-prompt-submit.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-prompt-submit.ts
+@@ -1,9 +1,17 @@
++import type { FinalModelRequestDispatchContract } from "@openclaw/ai/transports";
+ import type { StreamFn } from "openclaw/plugin-sdk/agent-core";
+ import {
+   runWithSessionSourceScope,
+   type SessionSourceAssertion,
+ } from "../../../config/sessions/session-source-authority.js";
+ import type { ImageContent } from "../../../llm/types.js";
++import { createAssistantMessageEventStream } from "../../../llm/utils/event-stream.js";
++import {
++  consumeEphemeralPromptContextRequest,
++  prepareEphemeralPromptContext,
++  type EphemeralPromptContext,
++  type PreparedEphemeralPromptContext,
++} from "../../../plugins/prompt-ephemeral-context.js";
+ import type { createTrajectoryRuntimeRecorder } from "../../../trajectory/runtime.js";
+ import type { Agent, AgentMessage } from "../../runtime/index.js";
+ import type { NextUserMessagePersistence } from "../../session-tool-result-guard.js";
+@@ -15,6 +23,7 @@
+ } from "../../sessions/compaction/request-budget.js";
+ import type { AgentSession } from "../../sessions/index.js";
+ import { withSessionManagerWrite } from "../../sessions/session-manager-write-admission.js";
++import { makeZeroUsageSnapshot } from "../../usage.js";
+ import {
+   declarePromptHistoryRewrite,
+   recordAggregateTruncation,
+@@ -76,6 +85,9 @@
+   activeSession: PromptSubmissionSession;
+   appendOnlyRuntimeContext?: boolean;
+   appendContext?: string;
++  ephemeralContexts?: readonly EphemeralPromptContext[];
++  /** Host-selected actual factory provenance, never a field supplied by the run/request. */
++  finalModelDispatch?: FinalModelRequestDispatchContract;
+   contextTokenBudget: number;
+   compactionRequestBudget?: CompactionRequestBudget;
+   compactBeforeRequest?: ReturnType<typeof createChatGPTV2CompactionBoundary>;
+@@ -158,7 +170,17 @@
+       };
+     };
+     activeSession.agent.prepareNextTurnWithContext = prepareNextTurn;
+-    const persistThenStream: StreamFn = async (model, context, options) =>
++    const prepareRequest = async <T>(
++      model: Parameters<StreamFn>[0],
++      context: Parameters<StreamFn>[1],
++      options: Parameters<StreamFn>[2],
++      consume: (request: {
++        context: Parameters<StreamFn>[1];
++        baseContext: Parameters<StreamFn>[1];
++        entries: PreparedEphemeralPromptContext[];
++        assertCurrent(): void;
++      }) => Promise<T>,
++    ): Promise<T> =>
+       runWithSessionSourceScope(
+         input.assertHostActive,
+         async () => {
+@@ -171,52 +193,156 @@
+           assertRequestCurrent();
+           await input.persistToolResultProjections();
+           assertRequestCurrent();
+-          let requestContext = context;
+           const foregroundRequest = captureCurrentPromptForModel && !activeSession.isCompacting;
+-          // Observe before V2 decides: only this observation can anchor the request's
+-          // measured prefix. A checkpoint request is observed again as its own request.
+-          const requestAnchor = foregroundRequest
+-            ? await input.onModelRequest?.(model, requestContext, options?.signal)
+-            : undefined;
+-          assertRequestCurrent();
+-          if (foregroundRequest && input.compactBeforeRequest) {
+-            const checkpoint = await input.compactBeforeRequest(
+-              async (compactionModel, compactionContext, compactionOptions) => {
+-                await input.onModelRequest?.(
+-                  compactionModel,
+-                  compactionContext,
+-                  compactionOptions?.signal,
+-                );
+-                assertRequestCurrent();
+-                return baseStreamFn(compactionModel, compactionContext, compactionOptions);
+-              },
+-              model,
+-              requestContext,
+-              options,
+-              requestAnchor,
+-            );
++          // Enrichment participates in the one observation for this foreground request.
++          const ephemeral =
++            foregroundRequest && input.finalModelDispatch?.version === 1
++              ? await Promise.all(
++                  (input.ephemeralContexts ?? []).map((entry) =>
++                    prepareEphemeralPromptContext(entry, assertRequestCurrent),
++                  ),
++                )
++              : [];
++          try {
++            let baseContext = context;
++            const currentEntries = () => {
++              const entries: PreparedEphemeralPromptContext[] = [];
++              let bytes = 0;
++              for (const entry of ephemeral) {
++                if (!entry?.text) {
++                  continue;
++                }
++                try {
++                  entry.assertCurrent();
++                } catch {
++                  continue;
++                }
++                const addition = Buffer.byteLength(entry.text, "utf8") + (entries.length ? 2 : 0);
++                if (bytes + addition <= Math.min(4_096, input.contextTokenBudget)) {
++                  bytes += addition;
++                  entries.push(entry);
++                }
++              }
++              return entries;
++            };
++            const currentTexts = () => currentEntries().map((entry) => entry.text ?? "");
++            const enrich = (texts: string[]) =>
++              texts.length
++                ? {
++                    ...baseContext,
++                    messages: [
++                      ...baseContext.messages,
++                      { role: "user" as const, content: texts.join("\n\n"), timestamp: Date.now() },
++                    ],
++                  }
++                : baseContext;
++            let requestContext = enrich(currentTexts());
++            // Observe before V2 decides: only this observation can anchor the request's
++            // measured prefix. A checkpoint request is observed again as its own request.
++            const requestAnchor = foregroundRequest
++              ? await input.onModelRequest?.(model, requestContext, options?.signal)
++              : undefined;
+             assertRequestCurrent();
+-            if (checkpoint) {
+-              // The provider checkpoint owns this entire outgoing prefix. Keep its
+-              // carrier in the loop as well as the durable session before the answer.
+-              lateUpdates.push(checkpoint);
+-              requestContext = {
+-                ...requestContext,
+-                messages: [...requestContext.messages, checkpoint],
+-              };
+-              await input.onModelRequest?.(model, requestContext, options?.signal);
++            if (foregroundRequest && input.compactBeforeRequest) {
++              const checkpoint = await input.compactBeforeRequest(
++                async (compactionModel, compactionContext, compactionOptions) => {
++                  await input.onModelRequest?.(
++                    compactionModel,
++                    compactionContext,
++                    compactionOptions?.signal,
++                  );
++                  assertRequestCurrent();
++                  return baseStreamFn(compactionModel, compactionContext, compactionOptions);
++                },
++                model,
++                baseContext,
++                options,
++                requestAnchor,
++                requestContext,
++              );
++              assertRequestCurrent();
++              if (checkpoint) {
++                // The provider checkpoint owns this entire outgoing prefix. Keep its
++                // carrier in the loop as well as the durable session before the answer.
++                lateUpdates.push(checkpoint);
++                baseContext = {
++                  ...baseContext,
++                  messages: [...baseContext.messages, checkpoint],
++                };
++                requestContext = enrich(currentTexts());
++                await input.onModelRequest?.(model, requestContext, options?.signal);
++              }
++            }
++            assertRequestCurrent();
++            input.assertHostActive?.();
++            if (foregroundRequest) {
++              projectionRecorder?.markSentToProvider?.();
++            }
++            assertRequestCurrent();
++            input.assertHostActive?.();
++            const entries = currentEntries();
++            requestContext = enrich(entries.map((entry) => entry.text ?? ""));
++            return await consume({
++              context: requestContext,
++              baseContext,
++              entries,
++              assertCurrent: assertRequestCurrent,
++            });
++          } finally {
++            for (const entry of ephemeral) {
++              entry?.release();
+             }
+           }
+-          assertRequestCurrent();
+-          input.assertHostActive?.();
+-          if (foregroundRequest) {
+-            projectionRecorder?.markSentToProvider?.();
+-          }
+-          const stream = await baseStreamFn(model, requestContext, options);
+-          return stream;
+         },
+         { checkAfter: false },
+       );
++    const persistThenStream: StreamFn = (model, context, options) => {
++      if (
++        input.finalModelDispatch?.version !== 1 ||
++        !input.ephemeralContexts?.length ||
++        !captureCurrentPromptForModel ||
++        activeSession.isCompacting
++      ) {
++        return prepareRequest(model, context, options, async (request) =>
++          baseStreamFn(model, request.context, options),
++        );
++      }
++      const output = createAssistantMessageEventStream();
++      void prepareRequest(model, context, options, (request) =>
++        consumeEphemeralPromptContextRequest({
++          entries: request.entries,
++          assertHostCurrent: () => request.assertCurrent(),
++          start: (withMemory) =>
++            baseStreamFn(model, withMemory ? request.context : request.baseContext, options),
++          publish: (event) => output.push(event),
++        }),
++      ).then(
++        (message) => {
++          if (message.stopReason === "error" || message.stopReason === "aborted") {
++            output.push({ type: "error", reason: message.stopReason, error: message });
++          } else {
++            output.push({ type: "done", reason: message.stopReason, message });
++          }
++          output.end(message);
++        },
++        (error: unknown) => {
++          const message = {
++            role: "assistant" as const,
++            content: [],
++            api: model.api,
++            provider: model.provider,
++            model: model.id,
++            usage: makeZeroUsageSnapshot(),
++            stopReason: "error" as const,
++            errorMessage: error instanceof Error ? error.message : String(error),
++            timestamp: Date.now(),
++          };
++          output.push({ type: "error", reason: "error", error: message });
++          output.end(message);
++        },
++      );
++      return output;
++    };
+     const providerPromptStreamFn = wrapStreamFnWithMessageTransform(
+       persistThenStream,
+       (messages) => {
+--- a/src/agents/embedded-agent-runner/run/attempt-stream-settle.ts
++++ b/src/agents/embedded-agent-runner/run/attempt-stream-settle.ts
+@@ -477,6 +477,7 @@
+   const {
+     streamFn,
+     strategy: streamStrategy,
++    finalModelDispatch,
+     wrapApiKey,
+   } = selectEmbeddedAgentStream({
+     currentStreamFn: defaultSessionStreamFn,
+@@ -710,5 +711,6 @@
+     effectivePromptCacheRetention,
+     providerTextTransforms,
+     streamStrategy,
++    ...(finalModelDispatch ? { finalModelDispatch } : {}),
+   };
+ }
+--- a/src/agents/embedded-agent-runner/run/chatgpt-v2-compaction.test.ts
++++ b/src/agents/embedded-agent-runner/run/chatgpt-v2-compaction.test.ts
+@@ -461,6 +461,60 @@
+     expect(f.onFallback).not.toHaveBeenCalled();
+   });
+ 
++  it.each([false, true])(
++    "prices request-only context without retaining it in compaction (measured=%s)",
++    async (measured) => {
++      const manager = SessionManager.inMemory();
++      const messages: Context["messages"] = [
++        { role: "user", content: "source request", timestamp: 1 },
++        createAssistant(model, "settled history", "stop", 23_900),
++      ];
++      for (const message of messages) {
++        manager.appendMessage(message);
++      }
++      const f = await fixture(manager, false);
++      const boundary = createChatGPTV2CompactionBoundary({
++        ...f.boundaryParams,
++        contextTokenBudget: 32_000,
++        reserveTokens: 8_000,
++      });
++      const context: Context = { systemPrompt: "stable system", messages };
++      const anchor = measured
++        ? { requestIndex: 1, messageCount: messages.length, contextTokens: 23_900 }
++        : undefined;
++      const options = { sessionId: f.session.sessionId };
++      await expect(
++        boundary(f.session.agent.streamFn, model, context, options, anchor),
++      ).resolves.toBeUndefined();
++      expect(requests).toHaveLength(0);
++
++      const ephemeralText = "EPHEMERAL_ONLY_" + "中".repeat(768);
++      const requestPressureContext: Context = {
++        ...context,
++        messages: [
++          ...messages,
++          { role: "user", content: ephemeralText, timestamp: 2 },
++        ],
++      };
++      await expect(
++        boundary(
++          f.session.agent.streamFn,
++          model,
++          context,
++          options,
++          anchor,
++          requestPressureContext,
++        ),
++      ).resolves.toMatchObject({ providerReplay: { compactedWindow: { outputTokens: 5 } } });
++      expect(requests).toHaveLength(1);
++      expect(requestAt(0).input.at(-1)?.type).toBe("compaction_trigger");
++      expect(realUserText(requestAt(0))).toEqual(["source request"]);
++      expect(JSON.stringify(requests)).not.toContain("EPHEMERAL_ONLY_");
++      expect(JSON.stringify(persistedMessages(manager))).not.toContain("EPHEMERAL_ONLY_");
++      expect(f.onFallback).not.toHaveBeenCalled();
++    },
++  );
++
+   it("skips soft compaction while tools are pending without lowering the client threshold", async () => {
+     const f = await fixture(SessionManager.inMemory(), false);
+     const boundary = createChatGPTV2CompactionBoundary({
+--- a/src/agents/embedded-agent-runner/run/chatgpt-v2-compaction.ts
++++ b/src/agents/embedded-agent-runner/run/chatgpt-v2-compaction.ts
+@@ -79,9 +79,10 @@
+   context: Context,
+   options: Parameters<StreamFn>[2],
+   requestAnchor?: MeasuredRequestContext,
++  requestPressureContext?: Context,
+ ) => Promise<AssistantMessage | undefined> {
+   let failed = false;
+-  return async (streamFn, model, context, options, requestAnchor) => {
++  return async (streamFn, model, context, options, requestAnchor, requestPressureContext) => {
+     if (!usesNativeOpenAICodexResponsesBackend(model) || params.session.isCompacting) {
+       return undefined;
+     }
+@@ -103,18 +104,24 @@
+     // A matching measured predecessor prices the unchanged prefix once, as the
+     // mid-turn precheck this boundary replaces does. Without one, keep the
+     // conservative preflight estimate, which honors persisted session usage.
++    // Request-only additions affect the foreground budget, never the retained checkpoint input.
++    const pressureContext = requestPressureContext ?? context;
+     const preflight = requestAnchor
+       ? undefined
+       : shouldPreemptivelyCompactBeforePrompt({
+           ...budget,
+-          messages: context.messages,
+-          systemPrompt: context.systemPrompt,
++          messages: pressureContext.messages,
++          systemPrompt: pressureContext.systemPrompt,
+           prompt: "",
+-          toolSchemaTokens: estimateToolSchemaTokenPressure(context.tools),
++          toolSchemaTokens: estimateToolSchemaTokenPressure(pressureContext.tools),
+         });
+     const outgoing = preflight
+       ? (preflight.compactionReplay ?? preflight)
+-      : resolveProjectedRequestPressure({ ...budget, context, previousRequest: requestAnchor });
++      : resolveProjectedRequestPressure({
++          ...budget,
++          context: pressureContext,
++          previousRequest: requestAnchor,
++        });
+     // V2 must send the complete window plus its trigger. Leave room for the
+     // next tool result instead of waiting for the client's reserve-based limit.
+     const contextTokens = Math.min(
+--- a/src/agents/embedded-agent-runner/run/params.ts
++++ b/src/agents/embedded-agent-runner/run/params.ts
+@@ -66,6 +66,8 @@
+   awaitSessionDiffBaseline?: () => Promise<void>;
+   /** Host-minted parent audience inherited by a trusted internal child run. */
+   memoryAudience?: import("../../../plugins/memory-provider-types.js").MemoryAudience;
++  /** Host-owned opt-in prompt grant; never forwarded to tools or other hook phases. */
++  promptMemoryAudience?: import("../../../plugins/memory-provider-types.js").MemoryAudience;
+   /** Detached runs may read session identity but never write its durable transcript or metadata. */
+   sessionPersistence?: "durable" | "detached";
+   /** Storage-neutral transcript/session target. Defaults to sessionId/sessionKey/agentId. */
+--- a/src/agents/embedded-agent-runner/run/run-attempt-dispatch.ts
++++ b/src/agents/embedded-agent-runner/run/run-attempt-dispatch.ts
+@@ -320,15 +320,18 @@
+   });
+   assertActiveRun();
+   // Resolve after the last fallible preparation so the attempt's finally owns the leases.
+-  const { memoryAudience, release: releaseMemoryAudience } =
+-    await resolveEmbeddedAttemptMemoryAudience({
+-      run: params,
+-      agentId: workspaceResolution.agentId,
+-      sessionKey: resolvedSessionKey,
+-      sessionId,
+-      admission: runInput.sessionAdmission,
+-      assertCallerCurrent: assertActiveRun,
+-    });
++  const {
++    memoryAudience,
++    promptMemoryAudience,
++    release: releaseMemoryAudience,
++  } = await resolveEmbeddedAttemptMemoryAudience({
++    run: params,
++    agentId: workspaceResolution.agentId,
++    sessionKey: resolvedSessionKey,
++    sessionId,
++    admission: runInput.sessionAdmission,
++    assertCallerCurrent: assertActiveRun,
++  });
+   const attemptControls = createAttemptControls({
+     admittedRunContext,
+     onAbort: () => {
+@@ -394,6 +397,7 @@
+     sessionId,
+     sessionKey: resolvedSessionKey,
+     memoryAudience,
++    promptMemoryAudience,
+     conversationRecall: params.conversationRecall,
+     promptCacheKey: params.promptCacheKey,
+     sandboxSessionKey: params.sandboxSessionKey,
+--- a/src/agents/embedded-agent-runner/stream-resolution.ts
++++ b/src/agents/embedded-agent-runner/stream-resolution.ts
+@@ -1,12 +1,17 @@
+ import type { LlmRuntime } from "@openclaw/ai";
+ import { notifyLlmRequestActivity, onLlmRequestActivity } from "@openclaw/ai/internal/runtime";
+ import { stripSystemPromptCacheBoundary } from "@openclaw/ai/internal/shared";
+-import { createBoundaryAwareStreamFnForModel } from "@openclaw/ai/transports";
++import {
++  createBoundaryAwareStreamFnForModel,
++  getFinalModelRequestDispatchContract,
++  type FinalModelRequestDispatchContract,
++} from "@openclaw/ai/transports";
+ import { hasNonEmptyString as hasResolvedRuntimeApiKey } from "@openclaw/normalization-core/string-coerce";
+ import { getStreamLlmRuntime } from "../../llm/model-runtime-binding.js";
+ import { admitProviderRateLimitStream } from "../../llm/provider-rate-limit-stream.js";
+ import "../ai-transport-runtime-host.js";
+ import { createAnthropicVertexStreamFnForModel } from "../anthropic-vertex-stream.js";
++import { getPreparedProviderStreamDispatchContract } from "../provider-stream.js";
+ import type { StreamFn } from "../runtime/index.js";
+ import type { EmbeddedRunAttemptParams } from "./run/types.js";
+ 
+@@ -84,9 +89,10 @@
+ export function resolveEmbeddedAgentStream(params: EmbeddedAgentStreamParams): {
+   streamFn: StreamFn;
+   strategy: string;
++  finalModelDispatch?: FinalModelRequestDispatchContract;
+ } {
+-  const { streamFn, strategy, wrapApiKey } = selectEmbeddedAgentStream(params);
+-  return { streamFn: wrapApiKey(streamFn), strategy };
++  const { streamFn, strategy, wrapApiKey, finalModelDispatch } = selectEmbeddedAgentStream(params);
++  return { streamFn: wrapApiKey(streamFn), strategy, finalModelDispatch };
+ }
+ 
+ /**
+@@ -97,6 +103,7 @@
+ export function selectEmbeddedAgentStream(params: EmbeddedAgentStreamParams): {
+   streamFn: StreamFn;
+   strategy: string;
++  finalModelDispatch?: FinalModelRequestDispatchContract;
+   /** Attaches the run credential when the selected transport sends it. */
+   wrapApiKey: (streamFn: StreamFn) => StreamFn;
+ } {
+@@ -121,10 +128,13 @@
+     streamFn: StreamFn,
+     options: Parameters<typeof wrapEmbeddedAgentStreamFn>[1],
+     strategy: string,
++    finalModelDispatch = getFinalModelRequestDispatchContract(streamFn) ??
++      getPreparedProviderStreamDispatchContract(streamFn),
+   ) => ({
+     streamFn: wrapEmbeddedAgentStreamFn(streamFn, options),
+     strategy,
+     wrapApiKey: wrapRunApiKey,
++    finalModelDispatch,
+   });
+   // Vertex and session-owned streams resolve their own auth.
+   const keepStreamAuth = (streamFn: StreamFn) => streamFn;
+--- a/src/agents/provider-stream.ts
++++ b/src/agents/provider-stream.ts
+@@ -1,6 +1,10 @@
+ import type { ApiRegistry } from "@openclaw/ai";
+ import "./ai-transport-runtime-host.js";
+-import { createTransportAwareStreamFnForModel } from "@openclaw/ai/transports";
++import {
++  createTransportAwareStreamFnForModel,
++  getFinalModelRequestDispatchContract,
++  type FinalModelRequestDispatchContract,
++} from "@openclaw/ai/transports";
+ import type { OpenClawConfig } from "../config/types.openclaw.js";
+ import { getModelLlmRuntime } from "../llm/model-runtime-binding.js";
+ import type { Api, Model } from "../llm/types.js";
+@@ -23,6 +27,13 @@
+   unwrapSecretSentinelsForProviderEgress,
+ } from "./provider-secret-egress.js";
+ import type { StreamFn } from "./runtime/index.js";
++
++const preparedDispatchContracts = new WeakMap<StreamFn, FinalModelRequestDispatchContract>();
++
++/** Host wrappers retain the actual selected built-in factory's final-effect contract. */
++export function getPreparedProviderStreamDispatchContract(stream: StreamFn | undefined) {
++  return stream && preparedDispatchContracts.get(stream);
++}
+ 
+ export function registerProviderStreamForModel<TApi extends Api>(params: {
+   model: Model<TApi>;
+@@ -105,6 +116,7 @@
+         }) ?? streamFn)
+       : streamFn;
+   const authAuthority = getProviderAuthAuthority(runtimeModel);
++  const finalDispatch = getFinalModelRequestDispatchContract(providerWrappedStreamFn);
+   const preparedStreamFn: StreamFn =
+     runtimeHandle || authAuthority
+       ? (model, context, options) => {
+@@ -120,6 +132,9 @@
+           );
+         }
+       : providerWrappedStreamFn;
++  if (finalDispatch) {
++    preparedDispatchContracts.set(preparedStreamFn, finalDispatch);
++  }
+   // Register custom APIs only after a concrete stream exists, so later callers
+   // can route by model.api without reloading provider runtime hooks.
+   if (apiRegistry) {
+--- /dev/null
++++ b/src/agents/provider-transport-fetch.authority.test.ts
+@@ -0,0 +1,174 @@
++import { afterEach, beforeEach, expect, it, vi } from "vitest";
++import { getRuntimeConfig } from "../config/config.js";
++import {
++  clearRuntimeConfigSnapshot,
++  setRuntimeConfigSnapshot,
++} from "../config/runtime-snapshot.js";
++import { fetchWithSsrFGuard } from "../infra/net/fetch-guard.js";
++import { withGuardedFetchRequestAuthority } from "../infra/net/fetch-request-authority.js";
++import { createDeferredCore } from "../shared/deferred.js";
++import { buildGuardedModelFetch } from "./provider-transport-fetch.js";
++import { makeProviderModelFixture } from "./test-helpers/provider-model-fixture.js";
++
++const { prepareLocalService } = vi.hoisted(() => ({ prepareLocalService: vi.fn() }));
++// mock-isolation: gate external service preparation while preserving the real model fetch and guard.
++vi.mock("./provider-local-service.js", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("./provider-local-service.js")>()),
++  ensureModelProviderLocalService: prepareLocalService,
++}));
++
++const model = makeProviderModelFixture<"openai-responses">({
++  id: "dispatch-fixture",
++  api: "openai-responses",
++  provider: "dispatch-fixture",
++  baseUrl: "https://model.example/v1",
++});
++const network = vi.fn<typeof fetch>();
++const auxiliaryRequest = async () => {
++  const result = await fetchWithSsrFGuard({ url: "https://auth.example/token" });
++  await result.response.text();
++  await result.release();
++};
++const modelRequest = async (body = "synthetic request-only fact") => {
++  const response = await buildGuardedModelFetch(model)(`${model.baseUrl}/responses`, {
++    method: "POST",
++    body,
++  });
++  return response.text();
++};
++
++beforeEach(() => {
++  prepareLocalService.mockReset().mockResolvedValue(undefined);
++  network.mockReset().mockImplementation(async () => new Response("ok"));
++  vi.stubGlobal("fetch", network);
++});
++afterEach(() => {
++  vi.unstubAllGlobals();
++  clearRuntimeConfigSnapshot();
++});
++
++it("signs model dispatch only at the real model egress, excluding auxiliary auth fetches", async () => {
++  const events: string[] = [];
++  const beforeEffect = vi.fn(() => events.push("model-dispatch"));
++  network.mockImplementation(async (input) => {
++    events.push(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
++    return new Response("ok");
++  });
++  await withGuardedFetchRequestAuthority(
++    () => {},
++    async () => {
++      await auxiliaryRequest();
++      expect(beforeEffect).not.toHaveBeenCalled();
++      await modelRequest();
++    },
++    undefined,
++    { modelDispatch: { version: 1, assertCurrent() {}, beforeEffect } },
++  );
++  expect(beforeEffect).toHaveBeenCalledOnce();
++  expect(events).toEqual([
++    "https://auth.example/token",
++    "model-dispatch",
++    "https://model.example/v1/responses",
++  ]);
++});
++
++it("rejects a revoked conversation-access grant after auxiliary auth before any model effect", async () => {
++  const entered = createDeferredCore();
++  const release = createDeferredCore();
++  const refusal = new Error("synthetic conversation access was revoked");
++  const beforeEffect = vi.fn();
++  const setConversationAccess = (allowed: boolean) =>
++    setRuntimeConfigSnapshot({
++      plugins: {
++        entries: {
++          "dispatch-fact-reader": { enabled: true, hooks: { allowConversationAccess: allowed } },
++        },
++      },
++    });
++  setConversationAccess(true);
++  prepareLocalService.mockImplementation(async () => {
++    await auxiliaryRequest();
++    entered.resolve();
++    await release.promise;
++  });
++  const pending = withGuardedFetchRequestAuthority(
++    () => {},
++    () => modelRequest(),
++    undefined,
++    {
++      modelDispatch: {
++        version: 1,
++        assertCurrent() {
++          if (
++            getRuntimeConfig().plugins?.entries?.["dispatch-fact-reader"]?.hooks
++              ?.allowConversationAccess !== true
++          ) {
++            throw refusal;
++          }
++        },
++        beforeEffect,
++      },
++    },
++  );
++  await entered.promise;
++  setConversationAccess(false);
++  release.resolve();
++  await expect(pending).rejects.toBe(refusal);
++  expect(beforeEffect).not.toHaveBeenCalled();
++  expect(
++    network.mock.calls.map(([input]) =>
++      typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
++    ),
++  ).toEqual(["https://auth.example/token"]);
++});
++
++it("keeps overlapping model dispatch grants separate when only one caller is revoked", async () => {
++  const entered = createDeferredCore();
++  const release = createDeferredCore();
++  const refused = new Error("caller A conversation access was revoked");
++  const aEffect = vi.fn();
++  const bEffect = vi.fn();
++  const publishGrants = (allowA: boolean) =>
++    setRuntimeConfigSnapshot({
++      plugins: {
++        entries: {
++          "dispatch-reader-a": { hooks: { allowConversationAccess: allowA } },
++          "dispatch-reader-b": { hooks: { allowConversationAccess: true } },
++        },
++      },
++    });
++  publishGrants(true);
++  prepareLocalService.mockImplementationOnce(async () => {
++    entered.resolve();
++    await release.promise;
++  });
++  const call = (pluginId: string, body: string, beforeEffect: () => void) =>
++    withGuardedFetchRequestAuthority(
++      () => {},
++      () => modelRequest(body),
++      undefined,
++      {
++        modelDispatch: {
++          version: 1,
++          assertCurrent() {
++            if (
++              getRuntimeConfig().plugins?.entries?.[pluginId]?.hooks?.allowConversationAccess !==
++              true
++            ) {
++              throw refused;
++            }
++          },
++          beforeEffect,
++        },
++      },
++    );
++  const pendingA = call("dispatch-reader-a", "caller A private fact", aEffect);
++  await entered.promise;
++  publishGrants(false);
++  await expect(call("dispatch-reader-b", "caller B private fact", bEffect)).resolves.toBe("ok");
++  release.resolve();
++  await expect(pendingA).rejects.toBe(refused);
++  expect(aEffect).not.toHaveBeenCalled();
++  expect(bEffect).toHaveBeenCalledOnce();
++  expect(network.mock.calls.map(([, init]) => init?.body)).toEqual(["caller B private fact"]);
++});
+--- a/src/agents/provider-transport-fetch.ts
++++ b/src/agents/provider-transport-fetch.ts
+@@ -10,6 +10,7 @@
+   parseStrictFiniteNumber,
+ } from "@openclaw/normalization-core/number-coercion";
+ import { withTrustedEnvProxyGuardedFetchMode } from "../infra/net/fetch-guard.js";
++import { captureModelRequestDispatchAuthority } from "../infra/net/fetch-request-authority.js";
+ import { wrapGuardedBodyStream } from "../infra/net/guarded-body-stream.js";
+ import { shouldUseEnvHttpProxyForUrl } from "../infra/net/proxy-env.js";
+ import { formatModelTransportContext } from "../llm/model-transport-context.js";
+@@ -279,6 +280,8 @@
+   const dispatcherPolicy = buildProviderRequestDispatcherPolicy(requestConfig);
+   const requestTimeoutMs = resolveModelRequestTimeoutMs(model, timeoutMs);
+   return async (input, init) => {
++    // Capture this invocation before local-service, DNS, capture or SDK preparation can yield.
++    const modelDispatch = captureModelRequestDispatchAuthority();
+     assertAuthCurrent?.();
+     const diagnosticContext = formatModelTransportContext();
+     let localServiceLease: ProviderLocalServiceLease | undefined;
+@@ -344,6 +347,7 @@
+       allowCrossOriginUnsafeRedirectReplay: false,
+       // Local service preparation, DNS and capture admission may outlive the credential owner.
+       beforeRequest: assertAuthCurrent,
++      ...(modelDispatch ? { onRequestInitiated: modelDispatch.beforeEffect } : {}),
+       ...(policy ? { policy } : {}),
+     };
+     let result: Awaited<ReturnType<typeof fetchWithProviderHttpGuard>>;
+--- a/src/infra/net/fetch-guard.authority.test.ts
++++ b/src/infra/net/fetch-guard.authority.test.ts
+@@ -1,7 +1,10 @@
+ import { beforeEach, expect, it, vi } from "vitest";
+ import { createDeferred } from "../../../test/helpers/promise.js";
+ import { fetchWithSsrFGuard, type GuardedFetchOptions } from "./fetch-guard.js";
+-import { withGuardedFetchRequestAuthority } from "./fetch-request-authority.js";
++import {
++  captureModelRequestDispatchAuthority,
++  withGuardedFetchRequestAuthority,
++} from "./fetch-request-authority.js";
+ 
+ const lookupFn = async () => [{ address: "93.184.216.34", family: 4 }];
+ const fetchImpl = vi.fn<NonNullable<GuardedFetchOptions["fetchImpl"]>>();
+@@ -79,6 +82,63 @@
+   expect(fetchImpl).toHaveBeenCalledOnce();
+   await result.release();
+ });
++
++it("checks every authority before signing the model effect and initiating raw fetch", async () => {
++  const events: string[] = [];
++  fetchImpl.mockImplementation(async () => {
++    events.push("fetch");
++    return new Response("ok");
++  });
++  await withGuardedFetchRequestAuthority(
++    () => {},
++    async () => {
++      const authority = captureModelRequestDispatchAuthority();
++      if (!authority) {
++        throw new Error("Missing host model dispatch custody");
++      }
++      const result = await request({
++        beforeRequest: () => events.push("credential"),
++        onRequestInitiated: authority.beforeEffect,
++      });
++      await result.release();
++    },
++    () => events.push("source"),
++    {
++      modelDispatch: {
++        version: 1,
++        assertCurrent: () => events.push("model-current"),
++        beforeEffect: () => events.push("model-dispatch"),
++      },
++    },
++  );
++  expect(events).toEqual(["credential", "source", "model-current", "model-dispatch", "fetch"]);
++});
++
++it("does not borrow another request's authority for a retained model dispatch callback", async () => {
++  let retained: ReturnType<typeof captureModelRequestDispatchAuthority>;
++  const beforeEffect = vi.fn();
++  await withGuardedFetchRequestAuthority(
++    () => {},
++    async () => {
++      retained = captureModelRequestDispatchAuthority();
++    },
++    undefined,
++    { modelDispatch: { version: 1, assertCurrent() {}, beforeEffect } },
++  );
++  await withGuardedFetchRequestAuthority(
++    () => {},
++    async () => {
++      if (!retained) {
++        throw new Error("Missing retained model dispatch custody");
++      }
++      await expect(request({ onRequestInitiated: retained.beforeEffect })).rejects.toThrow(
++        "no longer active",
++      );
++    },
++  );
++  expect(beforeEffect).not.toHaveBeenCalled();
++  expect(fetchImpl).not.toHaveBeenCalled();
++});
+ it.each([
+   [
+     { init: { method: "POST", body: "secret" } },
+--- a/src/infra/net/fetch-guard.ts
++++ b/src/infra/net/fetch-guard.ts
+@@ -13,7 +13,7 @@
+   shouldResolveConfiguredLocalOriginManagedProxyBypass,
+   type ConfiguredLocalOriginManagedProxyBypass,
+ } from "./configured-local-origin-bypass.js";
+-import { captureGuardedFetchRequestAuthority } from "./fetch-request-authority.js";
++import { captureGuardedFetchRequestAuthority, invokeSyncGuard } from "./fetch-request-authority.js";
+ import { responseWithAbortSignal } from "./guarded-body-stream.js";
+ import { PinnedDispatcherPool, type PinnedDispatcherLease } from "./pinned-dispatcher-pool.js";
+ import { shouldUseEnvHttpProxyForUrl } from "./proxy-env.js";
+@@ -63,6 +63,7 @@
+   fetchImpl?: FetchLike;
+   /** Final synchronous check after transport preparation and before each request or redirect. */
+   beforeRequest?: () => void | undefined;
++  onRequestInitiated?: () => void; // Records the effect after guards, immediately before raw fetch.
+   /** Observes response headers for each hop, including redirects, before cleanup. */
+   onResponse?: (status: number) => void;
+   init?: RequestInit;
+@@ -686,8 +687,7 @@
+             : {}),
+         },
+       };
+-      // Only transport rejection belongs here, not policy or capture failures.
+-      let initiated = false;
++      let initiated = false; // Only transport rejection belongs here, not policy or capture failures.
+       try {
+         response = await effect.initiate(() => {
+           const beforeRequestResult: unknown = params.beforeRequest?.();
+@@ -696,6 +696,7 @@
+             throw new TypeError("beforeRequest must be synchronous.");
+           }
+           assertCurrent?.();
++          invokeSyncGuard(() => params.onRequestInitiated?.(), "onRequestInitiated");
+           initiated = true;
+           return shouldUseRuntimeFetch
+             ? fetchWithRuntimeDispatcher(parsedUrl.toString(), init)
+--- a/src/infra/net/fetch-request-authority.ts
++++ b/src/infra/net/fetch-request-authority.ts
+@@ -1,7 +1,18 @@
+ import { isPromiseLike } from "@openclaw/normalization-core/promise-like";
+ import { AsyncContext } from "../../shared/async-context.js";
+ 
+-type RequestAuthority = { assertCurrent: () => void; beforeRequest: () => void };
++/** Host-only custody for a model request, distinct from auxiliary preparation traffic. */
++export type ModelRequestDispatchAuthorityV1 = Readonly<{
++  version: 1;
++  assertCurrent(): void;
++  beforeEffect(): void;
++}>;
++
++type RequestAuthority = {
++  assertCurrent: () => void;
++  beforeRequest: () => void;
++  modelDispatch?: ModelRequestDispatchAuthorityV1;
++};
+ 
+ // Host runtime and plugin SDK chunks must retain the same request-owned fence.
+ const requestAuthority = new AsyncContext<RequestAuthority>(
+@@ -19,11 +30,42 @@
+     : undefined;
+ }
+ 
+-function invokeSynchronousGuard(guard: (() => void) | undefined): void {
++/** Only a model transport's final effect boundary may consume this request's dispatch custody. */
++export function captureModelRequestDispatchAuthority():
++  | ModelRequestDispatchAuthorityV1
++  | undefined {
++  const authority = requestAuthority.getStore();
++  const modelDispatch = authority?.modelDispatch;
++  if (!authority || !modelDispatch) {
++    return undefined;
++  }
++  const assertCurrent = () => {
++    authority.assertCurrent();
++    invokeSyncGuard(modelDispatch.assertCurrent);
++  };
++  return {
++    version: 1,
++    assertCurrent,
++    beforeEffect() {
++      assertCurrent();
++      invokeSyncGuard(modelDispatch.beforeEffect);
++    },
++  };
++}
++
++/** Private model context requires the host's final guarded HTTP effect boundary. */
++export function hasModelRequestDispatchAuthority(): boolean {
++  return requestAuthority.getStore()?.modelDispatch !== undefined;
++}
++
++export function invokeSyncGuard(
++  guard: (() => void) | undefined,
++  label = "Guarded request authority",
++): void {
+   const result: unknown = guard?.();
+   if (isPromiseLike(result)) {
+     void Promise.resolve(result).catch(() => undefined);
+-    throw new TypeError("Guarded request authority must be synchronous.");
++    throw new TypeError(`${label} must be synchronous.`);
+   }
+ }
+ 
+@@ -32,9 +74,14 @@
+   assertCurrent: (() => void) | undefined,
+   run: (assertCurrent: (() => void) | undefined) => Promise<T>,
+   beforeRequest?: () => void,
++  options?: { modelDispatch: ModelRequestDispatchAuthorityV1 },
+ ): Promise<T> {
+   const inherited = requestAuthority.getStore();
+-  if (!assertCurrent && !beforeRequest && !inherited) {
++  const modelDispatch = options?.modelDispatch;
++  if (modelDispatch && modelDispatch.version !== 1) {
++    throw new Error("Unsupported model request dispatch authority version.");
++  }
++  if (!assertCurrent && !beforeRequest && !modelDispatch && !inherited) {
+     return await run(undefined);
+   }
+   let active = true;
+@@ -43,7 +90,7 @@
+     if (!active) {
+       throw new Error("Guarded request authority is no longer active.");
+     }
+-    invokeSynchronousGuard(assertCurrent);
++    invokeSyncGuard(assertCurrent);
+   };
+   try {
+     assertAuthority();
+@@ -52,8 +99,25 @@
+         assertCurrent: assertAuthority,
+         beforeRequest: () => {
+           inherited?.beforeRequest();
+-          invokeSynchronousGuard(beforeRequest);
++          invokeSyncGuard(beforeRequest);
+         },
++        ...(modelDispatch
++          ? {
++              modelDispatch: {
++                version: 1 as const,
++                assertCurrent() {
++                  invokeSyncGuard(inherited?.modelDispatch?.assertCurrent);
++                  invokeSyncGuard(modelDispatch.assertCurrent);
++                },
++                beforeEffect() {
++                  invokeSyncGuard(inherited?.modelDispatch?.beforeEffect);
++                  invokeSyncGuard(modelDispatch.beforeEffect);
++                },
++              },
++            }
++          : inherited?.modelDispatch
++            ? { modelDispatch: inherited.modelDispatch }
++            : {}),
+       },
+       () => run(assertAuthority),
+     );
+--- a/src/llm/ai-transport-host.test.ts
++++ b/src/llm/ai-transport-host.test.ts
+@@ -11,6 +11,7 @@
+ import { createOpenClawReadTool } from "../agents/agent-tools.read.js";
+ import { makeProviderModelFixture } from "../agents/test-helpers/provider-model-fixture.js";
+ import { createZeroUsageFixture } from "../agents/test-helpers/usage-fixtures.js";
++import { withGuardedFetchRequestAuthority } from "../infra/net/fetch-request-authority.js";
+ import { registerSecretValueForRedaction } from "../logging/secret-redaction-registry.js";
+ import { resetSecretRedactionRegistryForTest } from "../logging/secret-redaction-registry.test-support.js";
+ import {
+@@ -26,6 +27,23 @@
+   api: "anthropic-messages",
+   provider: "anthropic",
+   baseUrl: "https://api.anthropic.com",
++});
++
++it("requires managed HTTP only while private model-request dispatch custody is present", async () => {
++  const host = getAiTransportHost();
++  expect(host.requiresManagedTransport(anthropicModel)).toBe(false);
++  expect(host.requiresManagedTransport(anthropicModel, "fetch")).toBe(false);
++  await withGuardedFetchRequestAuthority(
++    () => {},
++    async () => {
++      expect(host.requiresManagedTransport(anthropicModel)).toBe(true);
++      expect(host.requiresManagedTransport(anthropicModel, "fetch")).toBe(true);
++    },
++    undefined,
++    { modelDispatch: { version: 1, assertCurrent() {}, beforeEffect() {} } },
++  );
++  expect(host.requiresManagedTransport(anthropicModel)).toBe(false);
++  expect(host.requiresManagedTransport(anthropicModel, "fetch")).toBe(false);
+ });
+ 
+ const textBlock = (text: string) => ({ type: "text" as const, text });
+--- a/src/llm/ai-transport-host.ts
++++ b/src/llm/ai-transport-host.ts
+@@ -10,6 +10,7 @@
+   buildGuardedModelFetch,
+   resolveModelRequestTimeoutMs,
+ } from "../agents/provider-transport-fetch.js";
++import { hasModelRequestDispatchAuthority } from "../infra/net/fetch-request-authority.js";
+ import { redactSecrets, redactToolPayloadText } from "../logging/redact.js";
+ import { createSubsystemLogger } from "../logging/subsystem.js";
+ import { normalizeAnthropicInlineContentBlocks } from "../media/anthropic-inline-images.js";
+@@ -42,6 +43,8 @@
+   requiresManagedTransport: (model, scope) => {
+     const request = getModelProviderRequestTransport(model);
+     return Boolean(
++      // Request-only private context uses the host's certified final HTTP boundary.
++      hasModelRequestDispatchAuthority() ||
+       request?.proxy ||
+       request?.tls ||
+       getModelProviderLocalService(model) ||
+--- a/src/plugins/hook-before-agent-start.types.ts
++++ b/src/plugins/hook-before-agent-start.types.ts
+@@ -35,6 +35,10 @@
+ };
+ 
+ export type PluginHookBeforePromptBuildResult = {
++  /** Opt-in audience reader, called at each provider request; never persisted or cached. */
++  ephemeralContext?: (context: {
++    hookInvocation: Readonly<{ assertActive(): void }>;
++  }) => Promise<{ text: string; assertCurrent(): void } | undefined>;
+   systemPrompt?: string;
+   prependContext?: string;
+   appendContext?: string;
+--- a/src/plugins/hook-runner-types.ts
++++ b/src/plugins/hook-runner-types.ts
+@@ -18,6 +18,10 @@
+     registration: PluginHookRegistration<K>,
+     event: HookEvent<K>,
+   ) => HookResult<K>;
++  projectContext?: (
++    registration: PluginHookRegistration<K>,
++    context: HookContext<K>,
++  ) => HookContext<K>;
+   isolateEventPerHandler?: boolean;
+   eventForHandler?: (event: HookEvent<K>, result: HookResult<K> | undefined) => HookEvent<K>;
+   mergeNullResults?: boolean;
+--- a/src/plugins/hook-types.ts
++++ b/src/plugins/hook-types.ts
+@@ -229,8 +229,10 @@
+     ? {
+         /** Run only after the host has finalized the turn's policy-filtered tool surface. */
+         requiresToolAuthority?: true;
++        /** Request a host-resolved session audience for this handler only. */
++        requiresMemoryAudience?: true;
+       }
+-    : { requiresToolAuthority?: never });
++    : { requiresToolAuthority?: never; requiresMemoryAudience?: never });
+ 
+ type PluginHookUsage = Pick<
+   NormalizedUsage,
+@@ -962,6 +964,7 @@
+   eligibleTriggers?: readonly PluginHookAgentTrigger[];
+   eligibleDispatchKinds?: readonly PluginHookReplyDispatchKind[];
+   requiresToolAuthority?: true;
++  requiresMemoryAudience?: true;
+   /** Host-resolved transcript authority. Never infer this again from plugin identity. */
+   conversationAccessAllowed?: true;
+   source: string;
+--- /dev/null
++++ b/src/plugins/hooks.prompt-memory-lifecycle.test.ts
+@@ -0,0 +1,149 @@
++import { randomUUID } from "node:crypto";
++import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
++import { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
++import { createHookRunner } from "./hooks.js";
++import { getPluginInstance } from "./plugin-instance-scope.js";
++import { revokePluginRecord } from "./registry-lifecycle.js";
++import { createTestPluginRegistry } from "./registry-runtime.test-helpers.js";
++import { createPluginRecord } from "./status.test-helpers.js";
++
++// mock-isolation: isolate durable generation facts while retaining real host audience issuance.
++vi.mock("../config/sessions/session-delivery-generation.js", async () => {
++  const { fakeSessionGenerationModule } = await import("./memory-audience.test-support.js");
++  return fakeSessionGenerationModule;
++});
++// mock-isolation: lineage reads use the same isolated generation owner as the audience lease.
++vi.mock("../config/sessions/session-entry-read-runtime.js", async () => {
++  const { fakeSessionEntryReadModule } = await import("./memory-audience.test-support.js");
++  return fakeSessionEntryReadModule;
++});
++
++import { assertMemoryAudienceCurrent, resolveMemoryAudienceFromEntry } from "./memory-audience.js";
++import { fakeSessionOwner } from "./memory-audience.test-support.js";
++
++const pluginId = "managed-memory-reader";
++const sessionKey = "agent:main:memory-reader";
++const event = { prompt: "where do I live?", messages: [], currentUserMessageId: "admitted:user" };
++
++async function memoryGrant() {
++  const entry = { sessionId: randomUUID(), updatedAt: 1, chatType: "direct" as const };
++  fakeSessionOwner.rows.set(sessionKey, entry);
++  const grant = await resolveMemoryAudienceFromEntry(
++    {
++      agentId: "main",
++      sessionKey,
++      sessionId: entry.sessionId,
++      storePath: "/tmp/memory-reader.sqlite",
++    },
++    entry,
++  );
++  if (grant.status !== "granted") {
++    throw new Error(`Test audience refused: ${grant.reason}`);
++  }
++  onTestFinished(grant.release);
++  return {
++    memoryAudience: grant.audience,
++    assertMemoryAudienceCurrent: () => assertMemoryAudienceCurrent(grant.audience),
++  };
++}
++
++function owner() {
++  setRuntimeConfigSnapshot({
++    plugins: {
++      entries: { [pluginId]: { enabled: true, hooks: { allowConversationAccess: true } } },
++    },
++  });
++  const builder = createTestPluginRegistry();
++  const record = createPluginRecord({ id: pluginId, origin: "global" });
++  builder.registry.plugins.push(record);
++  const api = builder.createApi(record, {
++    config: {},
++    hookPolicy: { allowConversationAccess: true },
++  });
++  const instance = getPluginInstance(record);
++  if (!instance) {
++    throw new Error("Registered hook must have a real managed plugin instance");
++  }
++  onTestFinished(async () => {
++    await instance.dispose();
++  });
++  return { ...builder, api, record, instance };
++}
++
++afterEach(() => {
++  setRuntimeConfigSnapshot({});
++  fakeSessionOwner.reset();
++});
++
++describe("managed request-only memory callbacks", () => {
++  it.each(["dispose", "revoke"] as const)(
++    "rejects the reader and its final result guard after its exact instance is %s",
++    async (retirement) => {
++      const current = owner();
++      const memoryContext = await memoryGrant();
++      current.api.on(
++        "before_prompt_build",
++        () => ({
++          ephemeralContext: async () => ({
++            text: "synthetic private city",
++            assertCurrent: memoryContext.assertMemoryAudienceCurrent,
++          }),
++        }),
++        { requiresMemoryAudience: true },
++      );
++      const result = await createHookRunner(current.registry).runBeforePromptBuild(
++        event,
++        { agentId: "main", sessionKey },
++        memoryContext,
++      );
++      expect(result?.ephemeralContexts).toHaveLength(1);
++      const reader = result?.ephemeralContexts?.[0];
++      if (!reader) {
++        throw new Error("Approved managed reader was not collected");
++      }
++      reader.assertCurrent();
++      const readContext = {
++        hookInvocation: { assertActive: memoryContext.assertMemoryAudienceCurrent },
++      };
++      const prepared = await reader.read(readContext);
++      expect(prepared?.text).toBe("synthetic private city");
++      prepared?.assertCurrent();
++
++      if (retirement === "dispose") {
++        await current.instance.dispose();
++      } else {
++        revokePluginRecord(current.registry, current.record);
++      }
++
++      // Neither the still-current audience nor the old array entry proves plugin lifetime.
++      memoryContext.assertMemoryAudienceCurrent();
++      expect(current.registry.typedHooks).toHaveLength(1);
++      expect(() => reader.assertCurrent()).toThrow();
++      expect(() => prepared?.assertCurrent()).toThrow();
++      await expect(async () => reader.read(readContext)).rejects.toThrow();
++    },
++  );
++
++  it("does not accept an unowned handler's nested callback as a managed reader", async () => {
++    const current = owner();
++    const memoryContext = await memoryGrant();
++    const read = vi.fn(async () => ({
++      text: "unowned cached private text",
++      assertCurrent: memoryContext.assertMemoryAudienceCurrent,
++    }));
++    current.registry.typedHooks.push({
++      pluginId,
++      hookName: "before_prompt_build",
++      source: "unowned-test",
++      requiresMemoryAudience: true,
++      handler: () => ({ ephemeralContext: read }),
++    });
++    const result = await createHookRunner(current.registry).runBeforePromptBuild(
++      event,
++      { agentId: "main", sessionKey },
++      memoryContext,
++    );
++    expect(result?.ephemeralContexts).toBeUndefined();
++    expect(read).not.toHaveBeenCalled();
++  });
++});
+--- a/src/plugins/hooks.ts
++++ b/src/plugins/hooks.ts
+@@ -12,6 +12,7 @@
+ import type { ExecutionIdentityAdmissionToken } from "../audit/execution-identity-admission.js";
+ import { recordRuntimeActionDecision } from "../audit/runtime-action-decision.js";
+ import { finalizeGroupThreadToolReply } from "../auto-reply/group-thread-context.js";
++import { getRuntimeConfig } from "../config/config.js";
+ import { formatHookErrorForLog } from "../hooks/fire-and-forget.js";
+ import { formatErrorMessage } from "../infra/errors.js";
+ import { concatOptionalTextSegments } from "../shared/text/join-segments.js";
+@@ -79,6 +80,11 @@
+   PluginHookResolveExecEnvEvent,
+ } from "./hook-types.js";
+ import { getPluginValueInstance, runPluginCleanup } from "./plugin-instance-scope.js";
++import type {
++  EphemeralPromptContext,
++  PromptBuildHookDispatchResult,
++} from "./prompt-ephemeral-context.js";
++import { capturePluginLifecycleAuthority } from "./registry-lifecycle.js";
+ import {
+   type PluginSubagentRequesterContext,
+   withPluginSubagentRequesterContext,
+@@ -649,9 +655,10 @@
+               ? cloneHookIsolationValue(hookName, dispatchEvent)
+               : dispatchEvent;
+           const invocation = hookName === "before_prompt_build" ? { active: true } : undefined;
++          const projectedContext = policy.projectContext?.(current, ctx) ?? ctx;
+           const handlerContext = invocation
+             ? {
+-                ...ctx,
++                ...projectedContext,
+                 hookInvocation: Object.freeze({
+                   assertActive() {
+                     if (!invocation.active) {
+@@ -660,7 +667,7 @@
+                   },
+                 }),
+               }
+-            : ctx;
++            : projectedContext;
+           let outcome: HookResult<K> | typeof HOOK_REPLACED | undefined;
+           try {
+             const promise = selection.invoke(current, () =>
+@@ -800,14 +807,86 @@
+     return firstError ? { status: "error", error: firstError } : { status: "declined" };
+   }
+ 
++  const collectEphemeralContext =
++    (
++      contexts: EphemeralPromptContext[],
++      ctx: PluginHookAgentContext,
++      memoryContext?: Pick<
++        PluginHookAgentContext,
++        "memoryAudience" | "assertMemoryAudienceCurrent"
++      >,
++    ) =>
++    ({
++      hook,
++      result,
++    }: {
++      hook: PluginHookRegistration<"before_prompt_build">;
++      result: PluginHookBeforePromptBuildResult | undefined;
++    }) => {
++      const audienceContext = memoryContext ?? ctx;
++      const instance = getPluginValueInstance(hook.handler);
++      if (
++        hook.requiresMemoryAudience !== true ||
++        !audienceContext.memoryAudience ||
++        !audienceContext.assertMemoryAudienceCurrent ||
++        typeof result?.ephemeralContext !== "function" ||
++        !instance?.owner ||
++        instance.owner.revoked ||
++        instance.owner.record.id !== hook.pluginId
++      ) {
++        return;
++      }
++      const instanceIsCurrent = capturePluginLifecycleAuthority(
++        instance.owner.registry,
++        instance.owner.record,
++        { scopedRuntime: true },
++      );
++      if (!instanceIsCurrent) {
++        return;
++      }
++      // A hook result is ordinary data; bind its nested reader and returned guard explicitly.
++      instance.admitFactory(result.ephemeralContext, ["assertCurrent"]);
++      contexts.push({
++        read: instance.wrap(result.ephemeralContext),
++        assertCurrent() {
++          if (
++            !instance.acceptingCalls ||
++            instance.owner?.revoked ||
++            instance.lifecycle.signal.aborted ||
++            !instanceIsCurrent()
++          ) {
++            throw new Error("prompt context plugin instance was retired");
++          }
++          if (!registry.typedHooks.includes(hook)) {
++            throw new Error("prompt context registration was retired");
++          }
++          const entry = getRuntimeConfig().plugins?.entries?.[hook.pluginId];
++          if (entry?.enabled === false || entry?.hooks?.allowConversationAccess !== true) {
++            throw new Error("prompt context conversation access was revoked");
++          }
++          audienceContext.assertMemoryAudienceCurrent?.();
++        },
++      });
++    };
++
+   async function runBeforePromptBuild(
+     event: PluginHookBeforePromptBuildEvent,
+     ctx: PluginHookAgentContext,
+-  ): Promise<PluginHookBeforePromptBuildResult | undefined> {
+-    return runModifyingHook("before_prompt_build", event, ctx, {
++    memoryContext?: Pick<PluginHookAgentContext, "memoryAudience" | "assertMemoryAudienceCurrent">,
++  ): Promise<PromptBuildHookDispatchResult | undefined> {
++    const ephemeralContexts: EphemeralPromptContext[] = [];
++    const result = await runModifyingHook("before_prompt_build", event, ctx, {
++      onHandlerResult: collectEphemeralContext(ephemeralContexts, ctx, memoryContext),
+       mergeResults: (acc, next, hook) => mergeBeforePromptBuild(acc, next, hook.pluginId, ctx),
+       includeRegistration: (registration) => registration.requiresToolAuthority !== true,
++      projectContext: (registration, context) =>
++        registration.requiresMemoryAudience === true && memoryContext
++          ? { ...context, ...memoryContext }
++          : context,
+     });
++    return result || ephemeralContexts.length
++      ? { ...result, ...(ephemeralContexts.length ? { ephemeralContexts } : {}) }
++      : undefined;
+   }
+ 
+   /** Runs context enrichment only after the host has finalized the turn's tool surface. */
+@@ -818,8 +897,12 @@
+       toolAuthorityFingerprint: string;
+       activeToolNames: readonly string[];
+       assertHostActive: () => void;
++      memoryContext?: Pick<
++        PluginHookAgentContext,
++        "memoryAudience" | "assertMemoryAudienceCurrent"
++      >;
+     },
+-  ): Promise<PluginHookBeforePromptBuildResult | undefined> {
++  ): Promise<PromptBuildHookDispatchResult | undefined> {
+     const sourceFingerprint = params.toolAuthorityFingerprint.trim();
+     if (!sourceFingerprint) {
+       return undefined;
+@@ -847,6 +930,7 @@
+       },
+       assertActive,
+     });
++    const ephemeralContexts: EphemeralPromptContext[] = [];
+     try {
+       const result = await runModifyingHook(
+         "before_prompt_build",
+@@ -854,16 +938,22 @@
+         { ...ctx, toolAuthority: authority },
+         {
+           mergeResults: mergeAgentTurnPrepare,
++          onHandlerResult: collectEphemeralContext(ephemeralContexts, ctx, params.memoryContext),
+           includeRegistration: (registration) => registration.requiresToolAuthority === true,
++          projectContext: (registration, context) =>
++            registration.requiresMemoryAudience === true && params.memoryContext
++              ? { ...context, ...params.memoryContext }
++              : context,
+           assertHandlerBoundaryActive: assertActive,
+         },
+       );
+-      if (!result) {
++      if (!result && !ephemeralContexts.length) {
+         return undefined;
+       }
+       return {
+-        ...(result.prependContext ? { prependContext: result.prependContext } : {}),
+-        ...(result.appendContext ? { appendContext: result.appendContext } : {}),
++        ...(ephemeralContexts.length ? { ephemeralContexts } : {}),
++        ...(result?.prependContext ? { prependContext: result.prependContext } : {}),
++        ...(result?.appendContext ? { appendContext: result.appendContext } : {}),
+       };
+     } finally {
+       token.active = false;
+@@ -1072,6 +1162,15 @@
+     }),
+     runBeforePromptBuild,
+     runAuthorizedPromptBuild,
++    hasMemoryAudiencePromptBuildHooks: (
++      ctx: Partial<HookContext<"before_prompt_build">>,
++    ): boolean =>
++      registry.typedHooks.some(
++        (hook) =>
++          hook.hookName === "before_prompt_build" &&
++          hook.requiresMemoryAudience === true &&
++          isHookContextEligible(hook, ctx),
++      ),
+     hasAuthorizedPromptBuildHooks: (ctx?: Partial<HookContext<"before_prompt_build">>): boolean =>
+       registry.typedHooks.some(
+         (hook) =>
+--- /dev/null
++++ b/src/plugins/prompt-ephemeral-context.ts
+@@ -0,0 +1,155 @@
++import { withGuardedFetchRequestAuthority } from "../infra/net/fetch-request-authority.js";
++import type {
++  AssistantMessage,
++  AssistantMessageEvent,
++  AssistantMessageEventStreamLike,
++} from "../llm/types.js";
++import { capturePluginStateReadDependencies } from "../plugin-state/plugin-state-publication.js";
++import type { PluginHookBeforePromptBuildResult } from "./hook-before-agent-start.types.js";
++import { withHookTimeout } from "./hook-timeout.js";
++
++/** Host custody of a registration's request-only reader; never a transcript value. */
++export type EphemeralPromptContext = {
++  read: NonNullable<PluginHookBeforePromptBuildResult["ephemeralContext"]>;
++  assertCurrent(): void;
++};
++
++export type PromptBuildHookDispatchResult = PluginHookBeforePromptBuildResult & {
++  ephemeralContexts?: EphemeralPromptContext[];
++};
++
++/** Reads stay live through provider consumption, including after other readers await. */
++export async function prepareEphemeralPromptContext(
++  context: EphemeralPromptContext,
++  assertHostCurrent: () => void,
++) {
++  let active = true;
++  const assertActive = () => {
++    if (!active) {
++      throw new Error("ephemeral prompt invocation is no longer active");
++    }
++    assertHostCurrent();
++    context.assertCurrent();
++  };
++  const pending = capturePluginStateReadDependencies(async () => {
++    assertActive();
++    const result = await context.read({ hookInvocation: Object.freeze({ assertActive }) });
++    assertActive();
++    return result &&
++      typeof result.text === "string" &&
++      typeof result.assertCurrent === "function" &&
++      Buffer.byteLength(result.text, "utf8") <= 4_096
++      ? result
++      : undefined;
++  });
++  try {
++    const captured = await withHookTimeout(pending, 2_000);
++    return {
++      // An old string/closure cache is insufficient: require a fresh tracked state read.
++      text: captured.dependencies.length ? captured.value?.text : undefined,
++      assertCurrent() {
++        assertActive();
++        captured.assertCurrent();
++        captured.value?.assertCurrent();
++      },
++      release() {
++        active = false;
++        captured.release();
++      },
++    };
++  } catch {
++    active = false;
++    // A timed-out reader may finish later; its result never reaches the request.
++    void pending.then(
++      (captured) => captured.release(),
++      () => {},
++    );
++    return undefined;
++  }
++}
++
++export type PreparedEphemeralPromptContext = NonNullable<
++  Awaited<ReturnType<typeof prepareEphemeralPromptContext>>
++>;
++
++/** Custody ends at producer terminal, rather than at the transport's early stream return. */
++export async function consumeEphemeralPromptContextRequest(input: {
++  entries: readonly PreparedEphemeralPromptContext[];
++  assertHostCurrent(): void;
++  start(
++    withMemory: boolean,
++  ): AssistantMessageEventStreamLike | Promise<AssistantMessageEventStreamLike>;
++  publish(event: AssistantMessageEvent): void;
++}): Promise<AssistantMessage> {
++  let sent = false;
++  let refused = false;
++  let published = false;
++  const assertMemoryCurrent = () => {
++    input.assertHostCurrent();
++    try {
++      for (const entry of input.entries) {
++        entry.assertCurrent();
++      }
++    } catch (error) {
++      refused = true;
++      throw error;
++    }
++  };
++  const consume = async (withMemory: boolean) => {
++    const source = await input.start(withMemory);
++    let pendingStart: AssistantMessageEvent | undefined;
++    for await (const event of source) {
++      // Terminal publication waits for the exact producer and its source scope to settle.
++      if (event.type === "done" || event.type === "error") {
++        continue;
++      }
++      if (withMemory && !sent) {
++        if (event.type === "start") {
++          pendingStart = event;
++          continue;
++        }
++        throw new Error("Memory transport emitted content without a final dispatch receipt");
++      }
++      if (pendingStart) {
++        input.publish(pendingStart);
++        pendingStart = undefined;
++      }
++      published = true;
++      input.publish(event);
++    }
++    return await source.result();
++  };
++  if (!input.entries.length) {
++    return consume(false);
++  }
++  let result: AssistantMessage;
++  try {
++    result = await withGuardedFetchRequestAuthority(
++      () => input.assertHostCurrent(),
++      () => consume(true),
++      undefined,
++      {
++        modelDispatch: {
++          version: 1,
++          assertCurrent: assertMemoryCurrent,
++          beforeEffect() {
++            // Only the host's model-send owner can call this, immediately before its effect.
++            sent = true;
++          },
++        },
++      },
++    );
++  } catch (error) {
++    if (!refused || sent || published) {
++      throw error;
++    }
++    // This frame is the original parent context: the private request scope has closed.
++    input.assertHostCurrent();
++    return consume(false);
++  }
++  if (refused && !sent && !published) {
++    input.assertHostCurrent();
++    return consume(false);
++  }
++  return result;
++}
+--- a/src/plugins/registry-registrars.ts
++++ b/src/plugins/registry-registrars.ts
+@@ -684,6 +684,11 @@
+       ...(hookName === "before_prompt_build" && opts?.requiresToolAuthority === true
+         ? { requiresToolAuthority: true }
+         : {}),
++      ...(hookName === "before_prompt_build" &&
++      opts?.requiresMemoryAudience === true &&
++      policy?.allowConversationAccess === true
++        ? { requiresMemoryAudience: true }
++        : {}),
+       ...(hookName === "session_end" && conversationAccessAllowed
+         ? { conversationAccessAllowed: true }
+         : {}),
+--- a/test/vitest/vitest.database-worker-core-paths.mjs
++++ b/test/vitest/vitest.database-worker-core-paths.mjs
+@@ -880,6 +880,7 @@
+   "src/agents/embedded-agent-runner/transcript-rewrite.test.ts",
+   "src/agents/embedded-agent-runner/tool-result-truncation.test.ts",
+   "src/agents/embedded-agent-runner/run/attempt-prompt-submit.test.ts",
++  "src/agents/embedded-agent-runner/run/attempt-prompt-submit.ephemeral-context.test.ts",
+   "src/agents/embedded-agent-runner/run/attempt-prompt-submit.runtime-replay.test.ts",
+   "src/agents/embedded-agent-runner/run/attempt-prompt-submit.projections.test.ts",
+   "src/agents/embedded-agent-runner/run/attempt-prompt-submit.pasted-text.test.ts",

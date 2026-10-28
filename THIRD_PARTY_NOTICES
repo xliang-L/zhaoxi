@@ -1,0 +1,14 @@
+OpenClaw — https://github.com/openclaw/openclaw
+MIT. The pinned revision is in runtime/upstream.json. Local modifications are
+provided as source patches. The upstream license is retained in
+runtime/LICENSE.openclaw and in every installed runtime.
+
+openclaw-weixin — https://github.com/Tencent/openclaw-weixin
+MIT. extensions/tencent-weixin is based on version 2.4.10, with local changes
+for verified private routing, memory intake, reminder delivery, quota guards,
+and multi-message replies. Tencent's license is retained at
+extensions/tencent-weixin/LICENSE.
+
+ClawX and SillyTavern were reviewed as design references. No source code from
+those projects is included. Python and JavaScript dependencies retain their
+own licenses in their installed distributions.
