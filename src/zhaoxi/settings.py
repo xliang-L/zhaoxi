@@ -23,6 +23,11 @@ class SettingsInput(BaseModel):
     context_tokens: int = Field(ge=4096, le=2000000)
     max_tokens: int = Field(ge=256, le=131072)
     monthly_token_limit: int | None = Field(default=50000000, ge=0, le=1000000000000)
+    memory_search_mode: str = Field(default="local", pattern="^(local|remote|keyword|off)$")
+    embedding_base: str = Field(default="", max_length=1000)
+    embedding_model: str = Field(default="text-embedding-3-small", max_length=200)
+    embedding_key: str | None = Field(default=None, max_length=4096)
+    clear_embedding_key: bool = False
 
 
 class Settings:
@@ -38,14 +43,18 @@ class Settings:
                 setattr(cfg, key, self.value[key])
 
     def public(self):
-        return {**{k: v for k, v in asdict(self.cfg).items() if k not in {"data", "api_key"}},
+        return {**{k: v for k, v in asdict(self.cfg).items() if k not in {"data", "api_key", "embedding_key"}},
                 "api_key_configured": bool(self.cfg.api_key),
+                "embedding_key_configured": bool(self.cfg.embedding_key),
                 "monthly_token_limit": self.value["monthly_token_limit"], "revision": self.value["revision"]}
 
     def changes_runtime(self, value):
-        fields = ("api_base", "api_model", "api_style", "reasoning_effort", "timezone", "context_tokens", "max_tokens")
+        fields = ("api_base", "api_model", "api_style", "reasoning_effort", "timezone", "context_tokens", "max_tokens",
+                  "memory_search_mode", "embedding_base", "embedding_model")
         next_key = "" if value.clear_api_key else value.api_key or self.cfg.api_key
-        return next_key != self.cfg.api_key or any(getattr(value, key) != getattr(self.cfg, key) for key in fields)
+        next_embedding_key = "" if value.clear_embedding_key else value.embedding_key or self.cfg.embedding_key
+        return (next_key != self.cfg.api_key or next_embedding_key != self.cfg.embedding_key or
+                any(getattr(value, key) != getattr(self.cfg, key) for key in fields))
 
     def save(self, value: SettingsInput):
         parsed = urlsplit(value.api_base)
@@ -58,12 +67,19 @@ class Settings:
             raise ValueError("请填写有效时区，例如 Asia/Shanghai。") from None
         if value.max_tokens >= value.context_tokens:
             raise ValueError("单次输出上限须小于模型上下文长度。")
+        embedding_url = urlsplit(value.embedding_base)
+        if value.embedding_base and (embedding_url.scheme not in {"http", "https"} or not embedding_url.hostname or
+                                     embedding_url.username or embedding_url.password or embedding_url.query or embedding_url.fragment):
+            raise ValueError("向量服务地址须为 HTTP(S) 地址，不能包含用户名、密码或查询参数。")
+        if value.memory_search_mode == "remote" and (not value.embedding_base or not value.embedding_model.strip()):
+            raise ValueError("请填写向量服务地址和向量模型名。")
         with self.lock:
             if value.revision != self.value["revision"]:
                 raise ValueError("设置已更新，请刷新后重新保存。")
             key = "" if value.clear_api_key else (value.api_key or self.cfg.api_key)
-            next_value = {**value.model_dump(exclude={"api_key", "clear_api_key"}),
-                          "api_key": key, "revision": value.revision + 1}
+            embedding_key = "" if value.clear_embedding_key else (value.embedding_key or self.cfg.embedding_key)
+            next_value = {**value.model_dump(exclude={"api_key", "clear_api_key", "embedding_key", "clear_embedding_key"}),
+                          "api_key": key, "embedding_key": embedding_key, "revision": value.revision + 1}
             private_json(self.path, next_value)
             self.value = next_value
             for name in asdict(self.cfg):

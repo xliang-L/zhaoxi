@@ -12,3 +12,8 @@ extensions/tencent-weixin/LICENSE.
 ClawX and SillyTavern were reviewed as design references. No source code from
 those projects is included. Python and JavaScript dependencies retain their
 own licenses in their installed distributions.
+
+FastEmbed — https://github.com/qdrant/fastembed
+Apache-2.0. Installed as a dependency; its distribution retains its license.
+The default BAAI/bge-small-zh-v1.5 embedding model is MIT-licensed, downloaded
+separately from https://huggingface.co/Qdrant/bge-small-zh-v1.5 into private data.

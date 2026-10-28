@@ -78,6 +78,19 @@
           <label class="check"><input type="checkbox" name="clear_api_key">清除已保存的密钥（用于无需密钥的本地服务）</label>
           <div class="field-grid"><label>推理强度<select name="reasoning_effort"><option value="">由服务默认决定</option><option value="none">none</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></label><label>用户时区<input name="timezone" required placeholder="Asia/Shanghai" maxlength="80"></label></div>
           <div class="field-grid"><label>模型上下文长度<input name="context_tokens" type="number" min="4096" max="2000000" required></label><label>单次输出 Token 上限<input name="max_tokens" type="number" min="256" max="131072" required></label></div>
+          <hr><h2>找回以前聊过的事</h2>
+          <p class="muted">每位微信用户只检索自己的聊天和记忆，包含压缩前的记录。检索保留原消息的时间和出处，不把故事或别人的经历当成你的记忆。</p>
+          <label>检索方式<select name="memory_search_mode"><option value="local">本机语义＋关键词（默认）</option><option value="remote">外部向量服务＋关键词</option><option value="keyword">仅关键词</option><option value="off">关闭历史与笔记检索</option></select></label>
+          <div id="local-memory"><p class="muted">本机模型约 90 MB，首次使用会下载。聊天内容在本机转换成向量，不需要额外 API Key。模型准备期间会提示检索降级。后台仅使用一个 CPU 线程。</p><div class="actions"><button id="prepare-memory" type="button">准备本机模型</button><span id="memory-state" class="muted" role="status"></span></div></div>
+          <div id="remote-memory" hidden>
+            <p class="muted">兼容 OpenAI 的 /embeddings 接口。选择后，本人的历史聊天和笔记会发送到此服务生成向量，按向量服务的规则计费；与聊天模型的月额度分开。</p>
+            <label>向量 API 地址<input name="embedding_base" type="url" maxlength="1000" placeholder="https://api.example.com/v1"></label>
+            <label>向量模型名<input name="embedding_model" maxlength="200" placeholder="text-embedding-3-small"></label>
+            <label>向量 API Key<input name="embedding_key" type="password" maxlength="4096" autocomplete="new-password" placeholder="留空沿用此向量服务已保存的密钥"></label>
+            <label class="check"><input type="checkbox" name="clear_embedding_key">清除向量服务密钥</label><span id="embedding-key-state" class="muted"></span>
+          </div>
+          <p class="muted">历史检索与「计划与记忆」的结构化自动记录分开。关闭检索保留已有聊天。更换向量模型或检索范围后，暂停当前机器人，重建索引，再恢复连接。首次使用会自动建立索引。</p>
+          <div class="actions"><button id="rebuild-memory" type="button">重建当前机器人索引</button><span id="rebuild-memory-state" class="muted" role="status">只处理当前机器人，保留原始聊天。</span></div>
           <hr><h2>每月用量</h2><p class="muted">所有机器人共用这份月额度。按实际返回用量结算，包含聊天、主动关心和搜索中的模型调用；不是服务商账户余额。</p>
           <label class="check"><input type="checkbox" name="unlimited">不限制每月 Token 数量</label>
           <label>每月 Token 上限<input name="monthly_token_limit" type="number" min="0" max="1000000000000"></label>

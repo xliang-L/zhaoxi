@@ -1,6 +1,7 @@
 """Single-administrator web console and native OpenClaw lifecycle."""
 from contextlib import asynccontextmanager
 import argparse
+import hmac
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,7 @@ from .business_reminders import BusinessReminders
 from .config import config
 from .connections import Connections
 from .memory_access import MemoryAccess, MemoryChoiceConflict
+from .embeddings import LocalEmbeddings, EmbeddingInput
 from .views import public_domain_view
 from .personas import Personas, PersonaInput, RESOURCES
 from .quota import quota_snapshot
@@ -46,11 +48,13 @@ class PackChange(BaseModel):
     enabled: bool
 
 
-def create_app(cfg=None, background=True, accounts_runtime=None):
+def create_app(cfg=None, background=True, accounts_runtime=None, port=8787):
     cfg = cfg or config()
     settings = Settings(cfg)
     packs = StoryPacks(cfg)
     connections = Connections(cfg, runtime=accounts_runtime)
+    connections.runtime.embedding_base = f"http://127.0.0.1:{port}/api/internal/memory"
+    embeddings = LocalEmbeddings(cfg.data / "models")
     auth = Auth(cfg, connections, settings)
     auth.bind_policies()
     personas = Personas(connections)
@@ -60,6 +64,8 @@ def create_app(cfg=None, background=True, accounts_runtime=None):
     @asynccontextmanager
     async def lifespan(app):
         if background:
+            if cfg.memory_search_mode == "local":
+                embeddings.prepare()
             connections.start()
             reminders.start()
         yield
@@ -72,6 +78,7 @@ def create_app(cfg=None, background=True, accounts_runtime=None):
     app.state.auth = auth
     app.state.packs = packs
     app.state.config = cfg
+    app.state.embeddings = embeddings
     hosts = [x.strip() for x in os.getenv("ZHAOXI_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver").split(",") if x.strip()]
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
     failed_logins = {}
@@ -87,6 +94,11 @@ def create_app(cfg=None, background=True, accounts_runtime=None):
             if origin and origin != str(request.base_url).rstrip("/"):
                 return JSONResponse({"detail": "请从当前管理页面发起操作。"}, status_code=403)
         public = {"/api/auth/session", "/api/auth/setup", "/api/auth/login", "/api/health"}
+        if path == "/api/internal/memory/embeddings":
+            if (not request.client or request.client.host not in {"127.0.0.1", "::1"} or
+                    not hmac.compare_digest(request.headers.get("authorization", "").encode(), ("Bearer " + connections.runtime.embedding_token).encode())):
+                return JSONResponse({"detail": "向量服务访问凭证无效。"}, status_code=401)
+            public.add(path)
         if path.startswith("/api/") and path not in public:
             if not actor:
                 return JSONResponse({"detail": "请先登录管理员。"}, status_code=401)
@@ -172,6 +184,41 @@ def create_app(cfg=None, background=True, accounts_runtime=None):
     def read_settings():
         return settings.public()
 
+    @app.get("/api/memory-search/status")
+    def memory_search_status():
+        return {"mode": cfg.memory_search_mode, "local": embeddings.status()}
+
+    @app.post("/api/memory-search/prepare")
+    def prepare_memory_search():
+        if cfg.memory_search_mode != "local":
+            raise ValueError("请先选择并保存本机语义检索。")
+        return embeddings.prepare()
+
+    @app.post("/api/internal/memory/embeddings")
+    def local_embeddings(body: EmbeddingInput):
+        if cfg.memory_search_mode != "local":
+            raise HTTPException(503, "本机语义检索未开启。")
+        try:
+            return embeddings.embed(body)
+        except RuntimeError as error:
+            raise HTTPException(503, str(error), headers={"Retry-After": "10"}) from None
+
+    @app.post("/api/me/memory-search/rebuild")
+    def rebuild_memory_search(request: Request):
+        with connections.operation(request.state.actor["space_id"]):
+            row = connections.get(request.state.actor["space_id"])
+            state, _ = connections.paths(row["id"])
+            if row["generation"] or connections.runtime.running(state):
+                raise ValueError("请先暂停当前机器人，再重建检索索引。")
+            if not row["owner"] or not row["bot_id"]:
+                raise ValueError("请先完成本人微信绑定。")
+            if cfg.memory_search_mode == "off":
+                raise ValueError("请先开启并保存检索设置。")
+            if cfg.memory_search_mode == "local" and embeddings.status()["phase"] != "ready":
+                raise ValueError("请先准备本机语义模型。")
+            connections.configure(row, False)
+            return connections.runtime.reindex_memory(state, peer_agent_id("primary", row["owner"]))
+
     @app.put("/api/settings")
     def save_settings(body: SettingsInput):
         with settings.lock:
@@ -189,6 +236,8 @@ def create_app(cfg=None, background=True, accounts_runtime=None):
             # Validation precedes every lifecycle change. The same validator also
             # covers settings loaded through environment or saved JSON.
             result = settings.save(body)
+            if background and cfg.memory_search_mode == "local":
+                embeddings.prepare()
             auth.bind_policies()
             if not reconnect:
                 return {**result, "reconnecting": 0}
@@ -337,4 +386,4 @@ def main():
     parser.add_argument("--host", default=os.getenv("ZHAOXI_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.getenv("ZHAOXI_PORT", "8787")))
     args = parser.parse_args()
-    uvicorn.run(create_app(cfg), host=args.host, port=args.port)
+    uvicorn.run(create_app(cfg, port=args.port), host=args.host, port=args.port)

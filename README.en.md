@@ -86,6 +86,16 @@ Persona changes apply from the next turn; previous conversations remain. Disabli
 
 Monthly budgets use Beijing calendar months and measured provider usage. They are application limits, not provider account balances. Scheduled reminders and daily greetings have separate authorization. The current proactive contact window is 09:00–24:00 Beijing time, further constrained by quiet hours, frequency limits and cooldowns. The service must stay running; sleep, network failures or expired WeChat authorization can affect delivery. Weather and automatic news notifications are not enabled.
 
+## Finding earlier conversations
+
+History search combines a local Chinese embedding model with keyword search by default. On first start, it downloads about 90 MB of model files to private `data/models/`. The download host receives no chat content. Under **模型与额度**, check model readiness or configure a separate OpenAI-compatible `/embeddings` endpoint, model and key. External embedding charges are separate from the chat token budget.
+
+Each verified WeChat user has a separate agent, workspace and index. Incremental history indexes survive restarts and include original records from before context compaction. Other bots, other WeChat users and the previous service are never imported. New bots still start empty. A shared administrator does not make their conversation memories shared.
+
+For questions about earlier conversations, the assistant searches relevant excerpts and checks their dates and speakers, with bounded original context available when needed. Retrieved text cannot authorize actions. Missing or unavailable recall must be disclosed rather than invented. Images, audio and files are searchable only through descriptions or extracted text already present in the conversation; original pixels and audio are not indexed.
+
+Index updates run in the background, so new messages can take time to appear; the current conversation already has its recent context. Local model preparation failures report degraded recall with keyword search still available; external embedding failures report unavailability. Keyword-only mode never calls an embedding service. Turning search off preserves original conversations and memory files. After changing embedding models or indexed sources, pause the selected bot in the console, choose **重建当前机器人索引**, then resume it. Rebuilding changes derived indexes only, not source records. Structured automatic memory continues to require separate user consent.
+
 ## Development
 
 ```bash
@@ -96,7 +106,7 @@ pytest -q
 npm test
 ```
 
-Node tests use the public SDK from `data/runtime/openclaw`. Set `ZHAOXI_TEST_OPENCLAW_ROOT` to test a separate runtime build. The installer uses the revision in `runtime/upstream.json` and applies the included memory and persona patches. It does not use the global OpenClaw configuration. Stop this deployment and back up data before upgrades; do not rebuild a running installation.
+Node tests use the public SDK from `data/runtime/openclaw`. Set `ZHAOXI_TEST_OPENCLAW_ROOT` to test a separate runtime build. Regular tests do not download embedding models. After preparing the model in the console, run pytest with `ZHAOXI_TEST_REAL_MEMORY=1` to include real-model recall and history-index checks. The installer uses the revision in `runtime/upstream.json` and applies the included memory and persona patches. It does not use the global OpenClaw configuration. Stop this deployment and back up data before upgrades; do not rebuild a running installation.
 
 ## License
 

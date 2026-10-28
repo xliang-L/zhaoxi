@@ -48,6 +48,7 @@ function updateConnectionButtons() {
   $('resume').disabled = !bot.connected || bot.running || pendingButtons.has('resume');
   $('stop').disabled = (!bot.running && !bot.qr_generation) || pendingButtons.has('stop');
   $('disconnect').disabled = !bot.connected || pendingButtons.has('disconnect');
+  $('rebuild-memory').disabled = !bot.connected || bot.running || Boolean(bot.qr_generation) || pendingButtons.has('rebuild-memory');
 }
 
 function panel() {
@@ -128,13 +129,47 @@ async function loadPersona() {
 async function loadSettings() {
   settings = await api('/api/settings');
   const form = $('settings-form');
-  for (const [name, value] of Object.entries(settings)) if (form.elements[name] && name !== 'api_key') form.elements[name].value = value ?? '';
+  for (const [name, value] of Object.entries(settings)) if (form.elements[name] && !['api_key', 'embedding_key'].includes(name)) form.elements[name].value = value ?? '';
   form.elements.api_key.value = '';
   form.elements.clear_api_key.checked = false;
+  form.elements.embedding_key.value = '';
+  form.elements.clear_embedding_key.checked = false;
   form.elements.unlimited.checked = settings.monthly_token_limit === null;
   form.elements.monthly_token_limit.disabled = form.elements.unlimited.checked;
   $('key-state').textContent = settings.api_key_configured ? '密钥已保存' : '尚未设置密钥';
+  $('embedding-key-state').textContent = settings.embedding_key_configured ? '向量密钥已保存' : '尚未设置向量密钥';
+  memoryFields();
+  await refreshMemory();
 }
+
+function memoryFields() {
+  const mode = $('settings-form').elements.memory_search_mode.value;
+  $('local-memory').hidden = mode !== 'local';
+  $('remote-memory').hidden = mode !== 'remote';
+}
+async function refreshMemory() {
+  const value = await api('/api/memory-search/status');
+  const phases = {idle: '首次检索前准备模型。', loading: '正在下载或加载模型，准备好后自动使用。', ready: '本机语义模型已就绪。', error: value.local.error};
+  $('memory-state').textContent = phases[value.local.phase] || '';
+  $('prepare-memory').disabled = ['loading', 'ready'].includes(value.local.phase);
+}
+$('settings-form').elements.memory_search_mode.onchange = memoryFields;
+$('prepare-memory').onclick = async () => {
+  await run(async () => {
+    await api('/api/memory-search/prepare', {}); await refreshMemory();
+  }, $('prepare-memory'));
+  await run(refreshMemory);
+};
+$('rebuild-memory').onclick = () => run(async () => {
+  $('rebuild-memory-state').textContent = '正在重建，历史较多时需要等一会儿。';
+  try {
+    await api('/api/me/memory-search/rebuild', {});
+    $('rebuild-memory-state').textContent = '索引已重建，可以恢复当前机器人的连接。';
+  } catch (error) {
+    $('rebuild-memory-state').textContent = '重建未完成，原始聊天仍保留。';
+    throw error;
+  }
+}, $('rebuild-memory'));
 
 async function loadPacks() {
   packs = await api('/api/story-packs');
@@ -262,6 +297,7 @@ $('settings-form').onsubmit = event => {
     value.monthly_token_limit = form.elements.unlimited.checked ? null : Number(value.monthly_token_limit);
     value.context_tokens = Number(value.context_tokens); value.max_tokens = Number(value.max_tokens);
     value.clear_api_key = form.elements.clear_api_key.checked; value.revision = settings.revision;
+    value.clear_embedding_key = form.elements.clear_embedding_key.checked;
     const saved = await api('/api/settings', value, 'PUT');
     await loadSettings(); await refreshStatus();
     $('settings-state').textContent = '已保存。';
@@ -277,4 +313,7 @@ try {
   $('auth-description').textContent = setupRequired ? '为这份部署设置一个管理员。没有公开注册入口。' : '管理你的微信助理。';
   if (actor) await openConsole(); else $('auth').hidden = false;
 } catch (error) { $('auth').hidden = false; $('auth-feedback').textContent = error.message; }
-setInterval(() => { if (actor && !$('console').hidden && document.visibilityState === 'visible') run(refreshStatus); }, 6000);
+setInterval(() => { if (actor && !$('console').hidden && document.visibilityState === 'visible') run(async () => {
+  await refreshStatus();
+  if (location.hash === '#settings') await refreshMemory();
+}); }, 6000);

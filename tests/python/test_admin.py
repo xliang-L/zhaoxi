@@ -77,6 +77,7 @@ def test_secrets_remain_server_side_across_save_blank_and_clear(site):
     c, app, _ = site
     value = c.get('/api/settings').json()
     value.pop('api_key_configured')
+    value.pop('embedding_key_configured')
     value.update(api_base='https://provider.example/v1', api_model='synthetic-model', api_key='SYNTHETIC-PRIVATE-KEY-48')
     saved = c.put('/api/settings', json=value)
     assert saved.status_code == 200, saved.text
@@ -106,6 +107,7 @@ def test_settings_conflict_and_invalid_url_leave_config_unchanged(site):
     c, app, _ = site
     value = c.get('/api/settings').json()
     value.pop('api_key_configured')
+    value.pop('embedding_key_configured')
     value.update(api_base='https://user:private@provider.example/v1', api_model='synthetic-model')
     assert c.put('/api/settings', json=value).status_code == 422
     assert app.state.config.api_base == ''
@@ -125,6 +127,7 @@ def test_quota_can_change_without_resetting_spent_tokens(site):
     db.execute('INSERT INTO quota_periods VALUES (?,?,?,?)', (quota_period(), 40, 25, 0))
     db.commit(); db.close()
     value = c.get('/api/settings').json(); value.pop('api_key_configured')
+    value.pop('embedding_key_configured')
     value.update(monthly_token_limit=1000)
     assert c.put('/api/settings', json=value).status_code == 200
     assert c.get('/api/status').json()['usage']['tokens'] == 65

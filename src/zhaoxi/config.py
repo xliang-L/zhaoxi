@@ -35,6 +35,10 @@ class Config:
     reasoning_effort: str = ""
     context_tokens: int = 128000
     max_tokens: int = 8192
+    memory_search_mode: str = "local"
+    embedding_base: str = ""
+    embedding_model: str = "text-embedding-3-small"
+    embedding_key: str = ""
 
     @property
     def model_ready(self):

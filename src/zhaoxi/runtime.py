@@ -12,11 +12,13 @@ import tempfile
 import shutil
 import logging
 import sqlite3
+import secrets
 from .memory_access import conversation_access_allowed
 from .quota import bind_quota_policy
 from .config import supported_node
+from .embeddings import LOCAL_MODEL
 
-TOOLS = ["automations", "skills_read", "session_status", "memory_search", "memory_get", "read", "write", "edit", "web_search", "platform_search"]
+TOOLS = ["automations", "skills_read", "session_status", "memory_search", "memory_get", "sessions_search", "sessions_history", "read", "write", "edit", "web_search", "platform_search"]
 CHANNEL = "openclaw-weixin"
 
 
@@ -54,6 +56,8 @@ class NativeRpcError(RuntimeError):
 class NativeRuntime:
     def __init__(self, cfg, root=None, plugin=None):
         self.cfg = cfg
+        self.embedding_token = secrets.token_urlsafe(32)
+        self.embedding_base = "http://127.0.0.1:8787/api/internal/memory"
         self.root = Path(root or os.getenv("ZHAOXI_RUNTIME_ROOT", cfg.data / "runtime/openclaw")).resolve()
         local_plugin = Path(__file__).resolve().parents[2] / "extensions/tencent-weixin"
         self.plugin = Path(plugin or local_plugin).resolve()
@@ -77,6 +81,36 @@ class NativeRuntime:
         """Runtime builds are an explicit installation step, outside serving Gateways."""
         if not self.available():
             raise RuntimeError("请先运行 python scripts/install_runtime.py 准备 OpenClaw 运行包。")
+
+    def memory_search_config(self):
+        mode = self.cfg.memory_search_mode
+        value = {"enabled": mode != "off", "rememberAcrossConversations": mode != "off",
+                 "sources": ["memory", "sessions"], "provider": "none", "fallback": "none",
+                 "store": {"fts": {"tokenizer": "trigram"}}, "query": {"maxResults": 8}}
+        if mode in {"local", "remote"}:
+            # Auto resolves the OpenAI wire adapter with this explicit loopback
+            # URL and key, while allowing native keyword fallback during warmup.
+            value.update(provider="auto" if mode == "local" else "openai-compatible", model=LOCAL_MODEL if mode == "local" else self.cfg.embedding_model,
+                         remote={"baseUrl": self.embedding_base if mode == "local" else self.cfg.embedding_base,
+                                 "apiKey": {"source": "env", "provider": "default", "id": "ZHAOXI_EMBEDDING_KEY"},
+                                 "batch": {"enabled": False}})
+        if mode == "local":
+            value["queryInstruction"] = "为这个句子生成表示以用于检索相关文章："
+            value["query"]["minScore"] = 0.2
+        return value
+
+    def reindex_memory(self, state, agent_id):
+        if self.running(state):
+            raise ValueError("请先暂停当前机器人，再重建检索索引。")
+        self.prepare()
+        try:
+            result = subprocess.run([str(self.node), str(self.root / "dist/entry.js"), "memory", "index", "--agent", agent_id, "--force"],
+                                    env=self.env(state), capture_output=True, text=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("索引重建超时，请稍后重试。原始聊天和记忆仍保留。") from None
+        if result.returncode:
+            raise RuntimeError("索引重建未完成，请确认向量服务已就绪后重试。原始聊天和记忆仍保留。")
+        return {"ok": True}
 
     def config(self, state, workspace, port, owner=None, enabled=False, token=None, authorized_peers=None):
         state, workspace = Path(state), Path(workspace)
@@ -116,13 +150,14 @@ class NativeRuntime:
             "session": {"dmScope": "per-account-channel-peer"},
             "messages": {"inbound": {"byChannel": {"openclaw-weixin": 1200}}, "queue": {"mode": "collect", "cap": 20, "drop": "summarize"}},
             "tools": {"web": {"search": {"enabled": True, "provider": "zhaoxi-responses"}},
-                "sessions": {"visibility": "self"}, "gatewayPolicy": {"allow": TOOLS,
+                "sessions": {"visibility": "agent"}, "gatewayPolicy": {"allow": TOOLS,
                 "actions": {"automations": ["status", "list", "get", "add", "update", "remove", "run", "runs", "wake", "scratch_get", "scratch_set", "record_result"]},
                 "automations": {"scope": "caller", "allowCommandJobs": False}}},
             "commands": {"ownerAllowFrom": [owner] if owner else [], "bash": False, "config": False,
                          "plugins": False, "mcp": False, "restart": False},
             "logging": {"level": "warn", "consoleLevel": "warn"},
-            "memory": {"search": {"provider": "none"}},
+            # Only verified, private peer agents opt into history indexing below.
+            "memory": {"search": {"enabled": False, "provider": "none", "rememberAcrossConversations": False}},
             "discovery": {"mdns": {"mode": "off"}},
         }
         domain_plugin = Path(__file__).resolve().parents[2] / "extensions/dafeiyu-domain"
@@ -176,6 +211,7 @@ class NativeRuntime:
                 (private_workspace / "AGENTS.md").chmod(0o600)
             value["agents"]["entries"][agent_id] = {
                 **template, "workspace": str(private_workspace), "skills": companion_skills,
+                "memory": {"search": self.memory_search_config()},
             }
             value["bindings"].append({"agentId": agent_id, "match": {
                 "channel": CHANNEL, "accountId": account_id,
@@ -248,6 +284,7 @@ class NativeRuntime:
                 "OPENCLAW_CONFIG": str(Path(state) / "openclaw.json"),
                 "OPENCLAW_OAUTH_DIR": str(Path(state) / "credentials"),
                 "ZHAOXI_PROJECT_ROOT": str(Path(__file__).resolve().parents[2]), "ZHAOXI_OPENCLAW_ROOT": str(self.root), "ZHAOXI_API_KEY": self.cfg.api_key, "OPENCLAW_LOG_LEVEL": "warn",
+                "ZHAOXI_EMBEDDING_KEY": self.embedding_token if self.cfg.memory_search_mode == "local" else self.cfg.embedding_key or "local-no-key",
                 "ZHAOXI_WEIXIN_SIBLING_STATES": json.dumps(siblings)}
 
     def running(self, state):
