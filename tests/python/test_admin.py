@@ -68,7 +68,7 @@ def test_authentication_origin_and_logout(site):
     for path in ['/api/settings', '/api/status', '/api/me/persona', '/api/story-packs']:
         assert c.get(path).status_code == 401
     assert c.post('/api/auth/login', json={'username': 'synthetic-admin', 'password': 'Synthetic-password-48'}).status_code == 200
-    cookie = c.cookies['zhaoxi_session']
+    cookie = c.cookies['zhaoxi_admin_session']
     assert cookie
     assert c.get('/api/auth/session').json()['actor']['role'] == 'admin'
 

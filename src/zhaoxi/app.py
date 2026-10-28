@@ -80,7 +80,7 @@ def create_app(cfg=None, background=True, accounts_runtime=None):
     @app.middleware("http")
     async def access(request, call_next):
         path = request.url.path
-        actor = auth.authenticate(request.cookies.get("zhaoxi_session")) if path.startswith("/api/") else None
+        actor = auth.authenticate(request.cookies.get("zhaoxi_admin_session")) if path.startswith("/api/") else None
         request.state.actor = actor
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             origin = request.headers.get("origin")
@@ -121,13 +121,13 @@ def create_app(cfg=None, background=True, accounts_runtime=None):
 
     def signed_in(result, request):
         response = JSONResponse({"actor": auth.public(result["actor"])})
-        response.set_cookie("zhaoxi_session", result["token"], httponly=True, samesite="strict",
+        response.set_cookie("zhaoxi_admin_session", result["token"], httponly=True, samesite="strict",
                             secure=request.url.scheme == "https", max_age=SESSION_SECONDS)
         return response
 
     @app.get("/api/auth/session")
     def session(request: Request):
-        return auth.state(request.cookies.get("zhaoxi_session"))
+        return auth.state(request.cookies.get("zhaoxi_admin_session"))
 
     @app.post("/api/auth/setup")
     def setup(body: Credentials, request: Request):
@@ -152,9 +152,9 @@ def create_app(cfg=None, background=True, accounts_runtime=None):
 
     @app.post("/api/auth/logout")
     def logout(request: Request):
-        auth.logout(request.cookies.get("zhaoxi_session"))
+        auth.logout(request.cookies.get("zhaoxi_admin_session"))
         response = JSONResponse({"ok": True})
-        response.delete_cookie("zhaoxi_session")
+        response.delete_cookie("zhaoxi_admin_session")
         return response
 
     @app.get("/api/health")
