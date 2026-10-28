@@ -34,6 +34,16 @@ def private_json(path, value):
     os.replace(temporary, path)
 
 
+def initialize_memory(workspace):
+    """New workspaces start empty; configuration never overwrites saved memories."""
+    for name in ("USER.md", "MEMORY.md"):
+        try:
+            descriptor = os.open(Path(workspace) / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            continue
+        os.close(descriptor)
+
+
 class NativeRpcError(RuntimeError):
     def __init__(self, *, retryable=False, outcome_unknown=False):
         super().__init__("独立后台暂时未完成请求，请稍后重试。")
@@ -72,6 +82,7 @@ class NativeRuntime:
         state, workspace = Path(state), Path(workspace)
         state.mkdir(parents=True, exist_ok=True, mode=0o700)
         workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
+        initialize_memory(workspace)
         soul = Path(__file__).resolve().parents[2] / "resources/personas/dafeiyu.md"
         if not (workspace / "SOUL.md").exists() and soul.exists():
             self.persona(state, workspace, "dafeiyu")
@@ -154,6 +165,7 @@ class NativeRuntime:
             agent_id = peer_agent_id(account_id, sender_id)
             private_workspace = workspace / "peers" / agent_id
             private_workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
+            initialize_memory(private_workspace)
             if not (private_workspace / "SOUL.md").exists():
                 shutil.copyfile(workspace / "SOUL.md", private_workspace / "SOUL.md")
             if not (private_workspace / "IDENTITY.md").exists() and (workspace / "IDENTITY.md").is_file():

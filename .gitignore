@@ -13,3 +13,14 @@ extensions/*/build/
 *.log
 dist/
 build/
+# Runtime user state must never become part of a source release.
+**/USER.md
+**/MEMORY.md
+**/workspace/
+**/workspaces/
+**/sessions/
+**/credentials/
+*.sqlite
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm

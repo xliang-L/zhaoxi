@@ -8,3 +8,13 @@ data
 __pycache__
 *.egg-info
 **/build
+**/USER.md
+**/MEMORY.md
+**/workspace
+**/workspaces
+**/sessions
+**/credentials
+**/*.sqlite
+**/*.sqlite3
+**/*.sqlite3-wal
+**/*.sqlite3-shm
