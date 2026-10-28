@@ -1,8 +1,18 @@
 from dataclasses import dataclass
 import os
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+NODE_REQUIREMENT = ">=24.22.1 <25 or >=26.12.1"
+
+
+def supported_node(version):
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", version.strip())
+    if not match:
+        return False
+    value = tuple(map(int, match.groups()))
+    return (value[0] == 24 and value >= (24, 22, 1)) or value >= (26, 12, 1)
 
 
 def load_env(path=ROOT / ".env"):

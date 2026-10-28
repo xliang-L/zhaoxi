@@ -1,4 +1,4 @@
-FROM node:24-trixie
+FROM node:24.22.1-trixie
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv git ca-certificates procps \
     poppler-utils tesseract-ocr tesseract-ocr-chi-sim \

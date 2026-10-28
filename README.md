@@ -17,7 +17,7 @@
 
 ## 本机运行
 
-需要 **Python 3.12+、Node.js 24+、Git 和 pnpm 12.15.0**。支持 macOS 和 Linux。首次安装需要下载并构建 OpenClaw，预留几 GB 磁盘和几分钟构建时间。
+推荐使用 **Python 3.12+、Node.js 24.22.1、Git 和 pnpm 12.15.0**。支持 macOS 和 Linux。首次安装需要下载并构建 OpenClaw，预留几 GB 磁盘和几分钟构建时间。
 
 ```bash
 git clone https://github.com/xliang-L/zhaoxi.git

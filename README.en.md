@@ -17,7 +17,7 @@ There is one administrator, with no public registration, membership billing or A
 
 ## Run locally
 
-Requires **Python 3.12+, Node.js 24+, Git and pnpm 12.15.0**. Supports macOS and Linux. The first installation downloads and builds OpenClaw; allow several GB of disk space and a few minutes for the build.
+Requires **Python 3.12+, Node.js 24.22.1, Git and pnpm 12.15.0**. Supports macOS and Linux. The first installation downloads and builds OpenClaw; allow several GB of disk space and a few minutes for the build.
 
 ```bash
 git clone https://github.com/xliang-L/zhaoxi.git

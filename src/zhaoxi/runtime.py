@@ -14,6 +14,7 @@ import logging
 import sqlite3
 from .memory_access import conversation_access_allowed
 from .quota import bind_quota_policy
+from .config import supported_node
 
 TOOLS = ["automations", "skills_read", "session_status", "memory_search", "memory_get", "read", "write", "edit", "web_search", "platform_search"]
 CHANNEL = "openclaw-weixin"
@@ -47,6 +48,10 @@ class NativeRuntime:
         local_plugin = Path(__file__).resolve().parents[2] / "extensions/tencent-weixin"
         self.plugin = Path(plugin or local_plugin).resolve()
         self.node = Path(os.getenv("ZHAOXI_NODE", shutil.which("node") or "node"))
+        try:
+            self.node_supported = supported_node(subprocess.check_output([str(self.node), "--version"], text=True, timeout=5))
+        except (OSError, subprocess.SubprocessError):
+            self.node_supported = False
         self.processes = {}
         self.servers = {}
         self.lock = threading.RLock()
@@ -54,7 +59,7 @@ class NativeRuntime:
     def available(self):
         try:
             version = json.loads((self.plugin / "package.json").read_text())["version"]
-            return version == "2.4.10" and all(p.exists() for p in [self.node, self.root / "dist/entry.js", self.root / ".zhaoxi-runtime.json", self.plugin / "build/index.js"])
+            return self.node_supported and version == "2.4.10" and all(p.exists() for p in [self.node, self.root / "dist/entry.js", self.root / ".zhaoxi-runtime.json", self.plugin / "build/index.js"])
         except (OSError, ValueError, KeyError):
             return False
 

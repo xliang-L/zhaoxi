@@ -10,7 +10,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
-from zhaoxi.config import load_env
+from zhaoxi.config import load_env, supported_node, NODE_REQUIREMENT
 
 
 def run(args, cwd):
@@ -22,9 +22,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--data-dir', type=Path, default=Path(os.getenv('ZHAOXI_DATA_DIR', ROOT / 'data')))
     args = parser.parse_args()
-    node = os.getenv('ZHAOXI_NODE') or shutil.which('node')
-    if not node or int(subprocess.check_output([node, '--version'], text=True).strip().lstrip('v').split('.')[0]) < 24:
-        raise SystemExit('Node.js 24+ is required. Install Node and run this command again.')
+    node = shutil.which(os.getenv('ZHAOXI_NODE', 'node'))
+    if not node or not supported_node(subprocess.check_output([node, '--version'], text=True)):
+        raise SystemExit('Node.js ' + NODE_REQUIREMENT + ' is required; use 24.22.1 for this release.')
+    # Every child spawned by the upstream build must use the same selected Node.
+    os.environ['PATH'] = str(Path(node).resolve().parent) + os.pathsep + os.environ.get('PATH', '')
     if not shutil.which('pnpm') or not shutil.which('git') or not shutil.which('npm'):
         raise SystemExit('git, npm and pnpm 12.15.0 are required.')
     if not subprocess.check_output(['pnpm', '--version'], text=True).strip().startswith('12.15.'):
