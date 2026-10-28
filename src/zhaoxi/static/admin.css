@@ -491,8 +491,15 @@ footer a {
     width:32px;
     height:32px
   }
-  .brand small,.nav-caption,.sidebar-bottom {
+  .brand small,.nav-caption,.sidebar-bottom p {
     display:none
+  }
+  .sidebar-bottom {
+    position:absolute;
+    right:18px;
+    top:18px;
+    margin:0;
+    padding:0
   }
   .sidebar nav {
     display:flex;
