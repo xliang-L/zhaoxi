@@ -42,6 +42,11 @@ class Settings:
                 "api_key_configured": bool(self.cfg.api_key),
                 "monthly_token_limit": self.value["monthly_token_limit"], "revision": self.value["revision"]}
 
+    def changes_runtime(self, value):
+        fields = ("api_base", "api_model", "api_style", "reasoning_effort", "timezone", "context_tokens", "max_tokens")
+        next_key = "" if value.clear_api_key else value.api_key or self.cfg.api_key
+        return next_key != self.cfg.api_key or any(getattr(value, key) != getattr(self.cfg, key) for key in fields)
+
     def save(self, value: SettingsInput):
         parsed = urlsplit(value.api_base)
         if value.api_base and (parsed.scheme not in {"http", "https"} or not parsed.hostname or

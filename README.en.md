@@ -65,7 +65,7 @@ Complete administrator setup on a trusted network before exposing the service. D
 
 ## Configuration and data
 
-Saved web settings take precedence over environment variables. Copy [.env.example](.env.example) to `.env` for deployment parameters. Keys are stored in private server-side files. HTTP responses return only whether a key is configured. Applying model changes reconnects this deployment's bots; active calls or unresolved usage reservations block the change.
+Saved web settings take precedence over environment variables. Copy [.env.example](.env.example) to `.env` for deployment parameters. Keys are stored in private server-side files. HTTP responses return only whether a key is configured. Budgets can be changed without resetting usage or reservations. Applying model changes reconnects this deployment's bots. When calls or reservations remain, wait or pause the connection in the console before changing the model.
 
 ```text
 src/zhaoxi/          Web service, single-admin authentication and runtime management

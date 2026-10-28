@@ -178,16 +178,20 @@ def create_app(cfg=None, background=True, accounts_runtime=None):
             if body.revision != settings.value["revision"]:
                 raise HTTPException(409, "设置已更新，请刷新后重新保存。")
             rows = connections.rows("SELECT * FROM accounts")
+            reconnect = settings.changes_runtime(body)
             for row in rows:
                 if row["generation"]:
                     raise HTTPException(409, "正在连接微信，请完成后再保存模型设置。")
                 usage = quota_snapshot(connections, row["id"])
-                if usage and usage["reserved"]:
-                    raise HTTPException(409, "仍有模型调用正在处理或待核对，请处理完成后再应用设置。")
+                state, _ = connections.paths(row["id"])
+                if reconnect and connections.runtime.running(state) and usage and usage["reserved"]:
+                    raise HTTPException(409, "仍有模型调用正在处理或待核对。请稍后保存，或先暂停微信连接再修改模型；已有用量和预留仍会保留。")
             # Validation precedes every lifecycle change. The same validator also
             # covers settings loaded through environment or saved JSON.
             result = settings.save(body)
             auth.bind_policies()
+            if not reconnect:
+                return {**result, "reconnecting": 0}
             restarting = []
             for row in rows:
                 state, _ = connections.paths(row["id"])

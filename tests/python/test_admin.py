@@ -131,8 +131,15 @@ def test_quota_can_change_without_resetting_spent_tokens(site):
     assert json.loads((state / 'quota-policy.json').read_text())['limit'] == 1000
     db = sqlite3.connect(state / 'quota.sqlite3'); db.execute('UPDATE quota_periods SET held=100'); db.commit(); db.close()
     value.update(revision=1, monthly_token_limit=2000)
+    assert c.put('/api/settings', json=value).status_code == 200
+    assert app.state.settings.value['monthly_token_limit'] == 2000
+    runtime = app.state.accounts.runtime
+    runtime.online.add(str(state))
+    value.update(revision=2, api_model='new-synthetic-model', api_base='http://127.0.0.1:1/v1')
     assert c.put('/api/settings', json=value).status_code == 409
-    assert app.state.settings.value['monthly_token_limit'] == 1000
+    runtime.stop(state)
+    assert c.put('/api/settings', json=value).status_code == 200
+    assert c.get('/api/status').json()['usage']['reserved'] == 100
 
 
 def test_visual_persona_saved_to_current_bot_only_and_conflicts(site):
